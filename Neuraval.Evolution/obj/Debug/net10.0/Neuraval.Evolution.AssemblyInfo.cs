@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Neuraval.Evolution")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+46525f8e8063dc228a711b8eb06e4ba648d7c066")]
 [assembly: System.Reflection.AssemblyProductAttribute("Neuraval.Evolution")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Neuraval.Evolution")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

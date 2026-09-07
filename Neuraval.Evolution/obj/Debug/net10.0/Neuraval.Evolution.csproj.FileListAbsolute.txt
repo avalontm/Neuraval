@@ -9,3 +9,4 @@ D:\_CODE_\Neuraval\Neuraval.Evolution\obj\Debug\net10.0\Neuraval.Evolution.dll
 D:\_CODE_\Neuraval\Neuraval.Evolution\obj\Debug\net10.0\refint\Neuraval.Evolution.dll
 D:\_CODE_\Neuraval\Neuraval.Evolution\obj\Debug\net10.0\Neuraval.Evolution.pdb
 D:\_CODE_\Neuraval\Neuraval.Evolution\obj\Debug\net10.0\ref\Neuraval.Evolution.dll
+D:\_CODE_\Neuraval\Neuraval.Evolution\obj\Debug\net10.0\Neuraval.Evolution.sourcelink.json

@@ -13,6 +13,19 @@ namespace Neuraval.Evolution.Neat
 
         public int LastSpeciesCount { get; private set; }
 
+        // El mejor genoma encontrado en toda la corrida hasta ahora. Se
+        // fuerza su presencia en cada generacion nueva (ver NextGeneration),
+        // independientemente de en que especie cayo o si esa especie
+        // sobrevivio la especiacion. Sin esto, con poblaciones chicas
+        // (5 agentes) es facil que el mejor genoma desaparezca para
+        // siempre: la elite por especie (EliteCountPerSpecies) solo actua
+        // si una especie individual llega a MinSpeciesSizeForElite
+        // miembros, algo que casi nunca pasa una vez que la poblacion se
+        // divide en 2+ especies. El progreso quedaba "guardado" en el
+        // checkpoint como dato (BestGenomeEver) pero nunca volvia a
+        // sembrar la evolucion activa.
+        public NeatGenome? GlobalBestGenome { get; set; }
+
         public NeatEvolutionStrategy(Random random, NeatInnovationTracker tracker, NeatEvolutionOptions options, Func<NeatGenome, TAgent> agentFactory)
         {
             _random = random;
@@ -102,6 +115,15 @@ namespace Neuraval.Evolution.Neat
             if (offspringGenomes.Count > populationSize)
             {
                 offspringGenomes = offspringGenomes.Take(populationSize).ToList();
+            }
+
+            // Elitismo global: pase lo que pase con la especiacion de esta
+            // generacion, el mejor genoma historico siempre ocupa un lugar
+            // en la proxima poblacion. Reemplaza el primer slot en vez de
+            // agregarse aparte para no alterar el tamano de poblacion.
+            if (GlobalBestGenome != null && offspringGenomes.Count > 0)
+            {
+                offspringGenomes[0] = GlobalBestGenome.Clone();
             }
 
             return offspringGenomes.Select(genome => _agentFactory(genome)).ToList();

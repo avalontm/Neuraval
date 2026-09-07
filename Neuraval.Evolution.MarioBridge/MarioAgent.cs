@@ -15,9 +15,49 @@ namespace Neuraval.Evolution.MarioBridge
         private const int TrackedSpriteCount = 3;
         private const int SignalsPerSprite = 3;
         private const int VelocitySignalCount = 2;
-        private const int ExtraSignalCount = VelocitySignalCount + TrackedSpriteCount * SignalsPerSprite;
+
+        // Señal directa de "estoy parado en el piso o en el aire". Antes la
+        // red tenia que inferir esto indirectamente de MarioVelocityY (que
+        // ademas comparte magnitud con la velocidad de caida, la de subida
+        // del salto, etc.) - eso le pedia mucho trabajo a la evolucion para
+        // aprender a distinguir salto corto (soltar B apenas despega) de
+        // salto largo (sostener B mientras sube). Con esta entrada explicita
+        // (1 = piso, 0 = aire) la red tiene una señal limpia para condicionar
+        // esa decision.
+        private const int GroundedSignalCount = 1;
+
+        // Forma actual de Mario (chico/grande/capa/fuego), codificada
+        // one-hot (4 señales, una prende y el resto en 0) en vez de un solo
+        // numero normalizado. Con un escalar (ej: powerup/3f) la red
+        // asumiria una relacion de orden entre las formas -- pero capa (2) y
+        // fuego (3) no son "mas" o "menos" que el otro, son estrategias
+        // distintas (planear vs atacar a distancia) que conviene que la red
+        // pueda distinguir sin forzar una escala. Esto tambien importa para
+        // el boton Y: con Mario de fuego, Y tira una bola de fuego en vez de
+        // correr/sostener un item -- la red necesita saber en que forma esta
+        // para aprender cuando conviene apretarlo.
+        private const int PowerupSignalCount = 4;
+        private const int MaxKnownPowerupLevel = PowerupSignalCount - 1;
+
+        private const int ExtraSignalCount = VelocitySignalCount + GroundedSignalCount + PowerupSignalCount + TrackedSpriteCount * SignalsPerSprite;
 
         public const int InputCount = GridCellCount + ExtraSignalCount;
+
+        // Nota: el SnesState ahora trae LevelIndex (que nivel/savestate esta
+        // corriendo), pero deliberadamente NO lo metemos como entrada de la
+        // red. Dos motivos: (1) la grilla de tiles y los sprites cercanos ya
+        // le dan a la red toda la informacion que necesita para reaccionar
+        // al nivel en el que esta -- igual que un jugador humano no necesita
+        // que le digan "estas en el nivel 3", lee el entorno; (2) el numero
+        // de niveles configurados vive en mario_bridge.lua (SAVESTATE_FILES)
+        // y en Program.cs (MarioLevels) por separado -- convertirlo en
+        // entrada de red exigiria mantener esos dos archivos perfectamente
+        // sincronizados en cantidad, o la topologia de la red quedaria mal
+        // formada sin que nada lo avise. Si en el futuro hace falta que la
+        // red distinga niveles explicitamente (por ejemplo, si dos niveles
+        // se ven demasiado parecidos en la grilla local), se puede agregar
+        // como input igual que se hizo con IsGrounded -- pero por ahora no
+        // hay evidencia de que haga falta.
 
         // 5ta salida: Y. En SMW default, Y es "correr" (sostenido, aumenta
         // velocidad) y tambien "agarrar/sostener/soltar" un item (shell, etc)
@@ -90,9 +130,22 @@ namespace Neuraval.Evolution.MarioBridge
 
             input[GridCellCount] = state.MarioVelocityX / VelocityScale;
             input[GridCellCount + 1] = state.MarioVelocityY / VelocityScale;
+            input[GridCellCount + 2] = state.IsGrounded ? 1f : 0f;
+
+            var powerupInputBase = GridCellCount + VelocitySignalCount + GroundedSignalCount;
+
+            // Clamp defensivo: si algun dia $19 devuelve algo fuera de
+            // 0-3 (estado transitorio raro, star power interactuando con
+            // el byte, etc.) preferimos no escribir fuera del arreglo en
+            // vez de tirar una excepcion que corte el episodio entero.
+            var clampedPowerup = Math.Clamp(state.PowerupLevel, 0, MaxKnownPowerupLevel);
+            for (var level = 0; level < PowerupSignalCount; level++)
+            {
+                input[powerupInputBase + level] = level == clampedPowerup ? 1f : 0f;
+            }
 
             var nearestSprites = NearestSprites(state, TrackedSpriteCount);
-            var spriteInputBase = GridCellCount + VelocitySignalCount;
+            var spriteInputBase = powerupInputBase + PowerupSignalCount;
 
             for (var slot = 0; slot < TrackedSpriteCount; slot++)
             {

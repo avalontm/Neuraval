@@ -14,6 +14,16 @@ namespace Neuraval.Evolution.MarioBridge
         private const int PopulationSize = 5;
         private const int MaxStepsPerEpisode = 1200;
 
+        // Nombres solo para el log de consola -- no afectan el entrenamiento
+        // en nada (el indice numerico es lo que se manda a Lua, ver
+        // environment.LevelIndex mas abajo). Puse "DP1" tal cual el nombre
+        // del archivo que ya tenias (D:/_CODE_/BizHawk/DP1.state); no se a
+        // ciencia cierta que nivel es, cambialo por el nombre real si lo
+        // sabes, o dejalo generico. Tiene que tener la MISMA cantidad de
+        // entradas que SAVESTATE_FILES en mario_bridge.lua, en el mismo
+        // orden -- son dos archivos separados que no se sincronizan solos.
+        private static readonly string[] MarioLevels = { "Nivel 0 (DP1.state)" };
+
         private static void Main(string[] args)
         {
             var resetRequested = args.Any(arg => arg.Equals("--reset", StringComparison.OrdinalIgnoreCase));
@@ -111,6 +121,21 @@ namespace Neuraval.Evolution.MarioBridge
             while (!stopRequested)
             {
                 generation++;
+
+                // Rotacion de niveles: TODA la poblacion de una generacion
+                // juega el mismo nivel (para que el fitness sea comparable
+                // entre genomas dentro de esa generacion), pero el nivel
+                // cambia de una generacion a la siguiente en orden (round
+                // robin). Con un solo nivel configurado esto no cambia nada
+                // respecto a antes -- agregar mas savestates en Lua y mas
+                // nombres en MarioLevels activa la rotacion sin tocar mas
+                // codigo.
+                environment.LevelIndex = MarioLevels.Length == 0 ? 0 : generation % MarioLevels.Length;
+                var levelLabel = environment.LevelIndex < MarioLevels.Length
+                    ? MarioLevels[environment.LevelIndex]
+                    : environment.LevelIndex.ToString();
+                Console.WriteLine($"-- Generacion {generation}: entrenando en \"{levelLabel}\" --");
+
                 var scores = population.EvaluateGeneration();
                 var bestThisGeneration = scores.Count == 0 ? 0f : scores.Max();
 
@@ -121,6 +146,11 @@ namespace Neuraval.Evolution.MarioBridge
                     bestGenomeEver = population.Agents[bestIndex].Genome.Clone();
                 }
 
+                // Asegura que el mejor genoma de toda la corrida siempre
+                // sobreviva a la proxima generacion, sin importar como
+                // termine especiandose la poblacion (ver comentario en
+                // NeatEvolutionStrategy.GlobalBestGenome).
+                strategy.GlobalBestGenome = bestGenomeEver;
                 population.Advance();
                 Console.WriteLine($"{generation,10} | {strategy.LastSpeciesCount,8} | {population.AverageFitness,17:F2} | {population.BestFitness,13:F2}");
 

@@ -1,4 +1,36 @@
-local SAVESTATE_FILE = "D:/_CODE_/BizHawk/DP1.state"
+-- Carpeta base donde estan los savestates. Es la unica linea que deberias
+-- necesitar tocar si moves la instalacion de BizHawk o el proyecto a otra
+-- carpeta/maquina -- las entradas de SAVESTATE_FILES de abajo son solo el
+-- nombre de archivo, no la ruta completa.
+local SAVESTATE_DIR = "D:/_CODE_/BizHawk/"
+
+-- Cada entrada es el savestate de un nivel distinto para entrenar (guardalo
+-- desde BizHawk con "Save State As" apenas arranca el nivel, igual que se
+-- hizo con DP1.state). El indice (0, 1, 2...) es lo que C# manda en
+-- "RESET:<indice>" para elegir cual cargar en la proxima generacion.
+--
+-- IMPORTANTE - esto son dos archivos separados (este .lua y Program.cs en
+-- C#) que no se sincronizan solos: si agregas o sacas una entrada de esta
+-- tabla, actualiza tambien MarioLevels en Program.cs para que el conteo
+-- coincida. Si C# pide un indice que no existe aca, se cae al nivel 0 (ver
+-- currentSavestateFile) en vez de romper el entrenamiento.
+local SAVESTATE_FILES = {
+    [0] = SAVESTATE_DIR .. "DP1.state",
+    -- [1] = SAVESTATE_DIR .. "OtroNivel.state",
+}
+
+local currentLevelIndex = 0
+
+local function currentSavestateFile()
+    local path = SAVESTATE_FILES[currentLevelIndex]
+    if path == nil then
+        console.log("MarioBridge: no hay savestate configurado para el nivel " .. currentLevelIndex ..
+            " en SAVESTATE_FILES; usando el nivel 0 en su lugar.")
+        return SAVESTATE_FILES[0]
+    end
+    return path
+end
+
 local RESET_COMMAND = "RESET"
 local STOP_COMMAND = "STOP"
 local GRID_RADIUS = 6
@@ -22,6 +54,16 @@ end
 
 local function livesRemaining()
     return memory.readbyte(0x0DBE) + 1
+end
+
+-- $7E:0019 = powerup/forma actual de Mario. Direccion muy documentada y
+-- estable (coincide en el RAM map de SMW Central, el "Alternate Ram Map" y
+-- el hilo historico de valores de RAM de imamelia, entre otras fuentes
+-- independientes): 0=chico, 1=grande, 2=capa, 3=fuego. La leemos tal cual y
+-- se la pasamos cruda a C# -- ver MarioAgent.cs para como se codifica como
+-- entrada de la red.
+local function marioPowerup()
+    return memory.readbyte(0x19)
 end
 
 -- $7E:1426 = Message box trigger. 0 = ninguno, >0 = hay un cartel de dialogo
@@ -86,6 +128,11 @@ end
 -- que el entrenamiento se recupere solo.
 local MAX_DISMISS_ATTEMPTS = 90 -- ~90 * (4+4) frames = ~12s a 60fps
 
+-- Devuelve true si tuvo que forzar un reset por savestate (cartel que no se
+-- cerro solo). El llamador debe tratar esto igual que un reset manual (avisar
+-- a C# con manualReset=true), o el entrenamiento sigue evaluando el episodio
+-- como si nada hubiera pasado, con Mario teletransportado de vuelta al inicio
+-- sin que nadie lo note.
 local function dismissMessageBox()
     local attempts = 0
     while isMessageBoxActive() do
@@ -94,8 +141,8 @@ local function dismissMessageBox()
             console.log("MarioBridge: cartel de dialogo no se cerro despues de " .. MAX_DISMISS_ATTEMPTS ..
                 " intentos; forzando reset por savestate para no colgar el entrenamiento.")
             releaseAllButtons()
-            savestate.load(SAVESTATE_FILE)
-            return
+            savestate.load(currentSavestateFile())
+            return true
         end
 
         local controller = {}
@@ -114,6 +161,8 @@ local function dismissMessageBox()
             emu.frameadvance()
         end
     end
+
+    return false
 end
 
 local function getTile(marioX, marioY, dx, dy)
@@ -147,6 +196,21 @@ local function buildSpriteList()
     return table.concat(sprites, ";")
 end
 
+-- $7E:0x7D = velocidad vertical de Mario (ya la leiamos para MarioVelocityY).
+-- El motor de SMW la fuerza a exactamente 0 en cada frame que Mario esta
+-- parado sobre el piso (no en el aire, no saltando, no cayendo) - es la
+-- misma logica que usa el juego internamente para decidir si Mario puede
+-- volver a saltar. La usamos como señal directa de "grounded" en vez de
+-- agregar una lectura de memoria nueva/no verificada: esto ya lo estabamos
+-- leyendo de forma confiable, solo lo reinterpretamos.
+--
+-- Unico caso borde: en el frame exacto del apice de un salto, VelocityY
+-- pasa por 0 un instante aunque Mario siga en el aire. Es un solo frame
+-- ocasional de ruido, no afecta el aprendizaje de forma practica.
+local function isGrounded(marioVY)
+    return marioVY == 0
+end
+
 local function buildState(levelComplete, manualReset)
     local marioX, marioY = marioPosition()
     local marioVX, marioVY = marioVelocity()
@@ -154,7 +218,12 @@ local function buildState(levelComplete, manualReset)
     local lives = livesRemaining()
     local tiles = buildTileGrid(marioX, marioY)
     local sprites = buildSpriteList()
+    local grounded = isGrounded(marioVY) and "1" or "0"
+    local powerup = marioPowerup()
 
+    -- powerup y levelIndex van al final, despues de los campos que ya
+    -- existian, para no correr de lugar nada que MarioCheckpointStore o
+    -- SnesState.Parse ya esperaban en una posicion fija.
     return table.concat({
         emu.framecount(),
         marioX,
@@ -165,8 +234,11 @@ local function buildState(levelComplete, manualReset)
         lives,
         tiles,
         sprites,
+        grounded,
         levelComplete and "1" or "0",
-        manualReset and "1" or "0"
+        manualReset and "1" or "0",
+        powerup,
+        currentLevelIndex
     }, "|")
 end
 
@@ -176,7 +248,17 @@ local function applyAction(response)
     end
 
     if response == RESET_COMMAND then
-        savestate.load(SAVESTATE_FILE)
+        -- "RESET" a secas (sin ":<indice>"): recarga el nivel actual tal
+        -- cual estaba. Se mantiene por compatibilidad con cualquier version
+        -- vieja de C# que no mande indice de nivel.
+        savestate.load(currentSavestateFile())
+        return false
+    end
+
+    local requestedLevelIndex = string.match(response, "^RESET:(%d+)$")
+    if requestedLevelIndex ~= nil then
+        currentLevelIndex = tonumber(requestedLevelIndex)
+        savestate.load(currentSavestateFile())
         return false
     end
 
@@ -196,11 +278,12 @@ local function applyAction(response)
 end
 
 while true do
+    local forcedReset = false
     if isMessageBoxActive() then
-        dismissMessageBox()
+        forcedReset = dismissMessageBox()
     end
 
-    local manualReset = manualResetPulse()
+    local manualReset = manualResetPulse() or forcedReset
     comm.socketServerSend(buildState(isLevelComplete(), manualReset) .. "\n")
     local response = comm.socketServerResponse()
     local shouldStop = applyAction(response)
