@@ -109,6 +109,8 @@ namespace Neuraval.ChatBot.Services
                 throw new InvalidOperationException("Model not initialized. Call BuildVocabularyFromTexts first.");
             }
 
+            _isTrained = true;
+
             var dataLoader = new DatasetLoader(_tokenizer, _maxSequenceLength);
             var causalExamples = dataLoader.LoadCausalConversationData(conversations);
             var (trainExamples, validationExamples) = dataLoader.SplitCausalData(causalExamples, (float)validationSplit);
@@ -152,8 +154,6 @@ namespace Neuraval.ChatBot.Services
                 LogFilePath = logFilePath,
                 GradientAccumulationSteps = gradientAccumulationSteps
             });
-
-            _isTrained = true;
         }
 
         /// <summary>
@@ -170,6 +170,8 @@ namespace Neuraval.ChatBot.Services
             {
                 throw new InvalidOperationException("Model not initialized. Call BuildVocabularyFromTexts first.");
             }
+
+            _isTrained = true;
 
             var dataLoader = new DatasetLoader(_tokenizer, _maxSequenceLength);
             var (inputs, targets) = dataLoader.LoadSequenceData(texts);
@@ -196,7 +198,6 @@ namespace Neuraval.ChatBot.Services
                 trainer.Train(trainInputs, trainTargets, epochs, batchSize);
             }
 
-            _isTrained = true;
             Console.WriteLine();
             Console.WriteLine("Training completed!");
         }

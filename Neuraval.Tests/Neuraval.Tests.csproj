@@ -16,6 +16,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Neuraval\Neuraval.csproj" />
     <ProjectReference Include="..\Neuraval.ChatBot\Neuraval.ChatBot.csproj" />
+    <ProjectReference Include="..\Neuraval.Evolution\Neuraval.Evolution.csproj" />
+    <ProjectReference Include="..\Neuraval.Evolution.MarioBridge\Neuraval.Evolution.MarioBridge.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,51 +1,51 @@
--- Carpeta base donde estan los savestates. Es la unica linea que deberias
--- necesitar tocar si moves la instalacion de BizHawk o el proyecto a otra
--- carpeta/maquina -- las entradas de SAVESTATE_FILES de abajo son solo el
--- nombre de archivo, no la ruta completa.
 local SAVESTATE_DIR = "D:/_CODE_/BizHawk/"
 
--- Cada entrada es el savestate de un nivel distinto para entrenar (guardalo
--- desde BizHawk con "Save State As" apenas arranca el nivel, igual que se
--- hizo con DP1.state). El indice (0, 1, 2...) es lo que C# manda en
--- "RESET:<indice>" para elegir cual cargar en la proxima generacion.
---
--- IMPORTANTE - esto son dos archivos separados (este .lua y Program.cs en
--- C#) que no se sincronizan solos: si agregas o sacas una entrada de esta
--- tabla, actualiza tambien MarioLevels en Program.cs para que el conteo
--- coincida. Si C# pide un indice que no existe aca, se cae al nivel 0 (ver
--- currentSavestateFile) en vez de romper el entrenamiento.
 local SAVESTATE_FILES = {
     [0] = SAVESTATE_DIR .. "DP1.state",
-    -- [1] = SAVESTATE_DIR .. "OtroNivel.state",
 }
 
 local currentLevelIndex = 0
+local captureMode = false
+
+local RESET_COMMAND = "RESET"
+local STOP_COMMAND = "STOP"
+local CAPTURE_COMMAND = "CAPTURE"
+local GRID_RADIUS = 6
+local BUTTON_NAMES = { "A", "B", "X", "Y", "Up", "Down", "Left", "Right", "L", "R", "Select", "Start" }
+local MESSAGE_BOX_ADDR = 0x1426
+local MESSAGE_BOX_HOLD_FRAMES = 4
+local MESSAGE_BOX_RELEASE_FRAMES = 4
+local MAX_DISMISS_ATTEMPTS = 90
+local LEVEL_END_ADDR = 0x1493
+local MANUAL_RESET_KEY = "Insert"
+local manualResetKeyWasDown = false
 
 local function currentSavestateFile()
     local path = SAVESTATE_FILES[currentLevelIndex]
     if path == nil then
-        console.log("MarioBridge: no hay savestate configurado para el nivel " .. currentLevelIndex ..
-            " en SAVESTATE_FILES; usando el nivel 0 en su lugar.")
         return SAVESTATE_FILES[0]
     end
     return path
 end
 
-local RESET_COMMAND = "RESET"
-local STOP_COMMAND = "STOP"
-local GRID_RADIUS = 6
-local BUTTON_NAMES = { "A", "B", "X", "Y", "Up", "Down", "Left", "Right", "L", "R", "Select", "Start" }
+local function readS8(address)
+    local value = memory.readbyte(address)
+    if value > 0x7F then
+        value = value - 0x100
+    end
+    return value
+end
 
 local function marioPosition()
-    local x = memory.read_s16_le(0x94)
-    local y = memory.read_s16_le(0x96)
-    return x, y
+    return memory.read_s16_le(0x94), memory.read_s16_le(0x96)
+end
+
+local function marioSubSpeed()
+    return memory.readbyte(0x7A)
 end
 
 local function marioVelocity()
-    local vx = memory.read_s8(0x7B)
-    local vy = memory.read_s8(0x7D)
-    return vx, vy
+    return readS8(0x7B), readS8(0x7D)
 end
 
 local function isMarioDead()
@@ -56,27 +56,120 @@ local function livesRemaining()
     return memory.readbyte(0x0DBE) + 1
 end
 
--- $7E:0019 = powerup/forma actual de Mario. Direccion muy documentada y
--- estable (coincide en el RAM map de SMW Central, el "Alternate Ram Map" y
--- el hilo historico de valores de RAM de imamelia, entre otras fuentes
--- independientes): 0=chico, 1=grande, 2=capa, 3=fuego. La leemos tal cual y
--- se la pasamos cruda a C# -- ver MarioAgent.cs para como se codifica como
--- entrada de la red.
+local function marioDirection()
+    return memory.readbyte(0x76)
+end
+
+local function marioBlocked()
+    return memory.readbyte(0x77)
+end
+
+local function marioSubpixel()
+    return memory.readbyte(0x13DA), memory.readbyte(0x13DC)
+end
+
+local function marioAirState()
+    return memory.readbyte(0x72)
+end
+
+local function marioDucking()
+    return memory.readbyte(0x73)
+end
+
+local function marioClimbing()
+    return memory.readbyte(0x74)
+end
+
+local function marioWater()
+    return memory.readbyte(0x75)
+end
+
+local function marioPMeter()
+    return memory.readbyte(0x13E4)
+end
+
+local function marioTakeoff()
+    return memory.readbyte(0x149F)
+end
+
+local function marioHurt()
+    return memory.readbyte(0x1496)
+end
+
+local function marioCape()
+    return memory.readbyte(0x14A5)
+end
+
+local function marioPowTimers()
+    return memory.readbyte(0x14AD), memory.readbyte(0x14AE)
+end
+
+local function doorExitCounter()
+    return memory.readbyte(0x141A)
+end
+
+local function itemMemory()
+    return memory.readbyte(0x13BE)
+end
+
+local function currentPlayerState()
+    return memory.readbyte(0x0DA0), memory.readbyte(0x0DB3), memory.readbyte(0x0DBF)
+end
+
 local function marioPowerup()
     return memory.readbyte(0x19)
 end
 
--- $7E:1426 = Message box trigger. 0 = ninguno, >0 = hay un cartel de dialogo
--- activo (mensaje de nivel, "gracias" de Yoshi, etc). Mientras esta activo el
--- juego queda esperando un boton para cerrarlo; la red nunca aprendio a
--- apretar Start en ese contexto (ni siquiera es una de sus salidas), asi que
--- el episodio se quedaba trabado ahi hasta el timeout/reset manual.
-local MESSAGE_BOX_ADDR = 0x1426
-local MESSAGE_BOX_HOLD_FRAMES = 4
-local MESSAGE_BOX_RELEASE_FRAMES = 4
+local function cameraPosition()
+    return memory.read_s16_le(0x1462), memory.read_s16_le(0x1464)
+end
+
+local function gameState()
+    return memory.readbyte(0x0100), memory.readbyte(0x0D9B), memory.readbyte(0x13BF)
+end
+
+local function marioCollectibles()
+    return memory.readbyte(0x0DB6), memory.readbyte(0x0DBC)
+end
+
+local function marioReservedItemBox()
+    return memory.readbyte(0x0DC2)
+end
+
+local function marioCarryFlags()
+    return memory.readbyte(0x1470), memory.readbyte(0x148F)
+end
+
+local function midwayCheckpointFlags()
+    return memory.readbyte(0x13CE), memory.readbyte(0x13CD)
+end
+
+local function yoshiCoinsCollected()
+    return memory.readbyte(0x1420)
+end
+
+local function marioControllerCopies()
+    return memory.readbyte(0x0DA2), memory.readbyte(0x0DA4)
+end
+
+local function secondPlayerControllers()
+    return memory.readbyte(0x0DA3), memory.readbyte(0x0DA5), memory.readbyte(0x0DA7), memory.readbyte(0x0DA9)
+end
+
+local function controllerState()
+    return memory.readbyte(0x0015), memory.readbyte(0x0016), memory.readbyte(0x0017), memory.readbyte(0x0018)
+end
+
+local function frameCounters()
+    return memory.readbyte(0x13), memory.readbyte(0x14), memory.readbyte(0x1F2)
+end
 
 local function isMessageBoxActive()
     return memory.readbyte(MESSAGE_BOX_ADDR) ~= 0
+end
+
+local function isLevelComplete()
+    return memory.readbyte(LEVEL_END_ADDR) ~= 0
 end
 
 local function releaseAllButtons()
@@ -87,25 +180,6 @@ local function releaseAllButtons()
     joypad.set(controller)
 end
 
--- $7E:1493 = "activate end level flag": el juego lo pone en un valor
--- distinto de 0 (normalmente $FF) apenas Mario toca la meta (tape/orb) y
--- arranca la secuencia de fin de nivel. Lo usamos para avisarle a C# que
--- el episodio termino por completar el nivel (no por morir).
-local LEVEL_END_ADDR = 0x1493
-
-local function isLevelComplete()
-    return memory.readbyte(LEVEL_END_ADDR) ~= 0
-end
-
--- Reset manual "por las dudas": mantené la ventana de BizHawk enfocada y
--- apreta esta tecla si el agente se queda pegado en algo que las
--- detecciones automaticas (dialogo, muerte, fin de nivel) no cubren.
--- Corta el episodio actual como si Mario hubiera muerto, sin tener que
--- cerrar ni reiniciar el proceso de entrenamiento. Si esta tecla choca con
--- algun hotkey que ya uses en BizHawk, cambiala aca nomas.
-local MANUAL_RESET_KEY = "Insert"
-local manualResetKeyWasDown = false
-
 local function manualResetPulse()
     local keys = input.get()
     local isDown = keys[MANUAL_RESET_KEY] == true
@@ -113,33 +187,13 @@ local function manualResetPulse()
     manualResetKeyWasDown = isDown
     return pulse
 end
--- alterna sostener Start+A (los dos candidatos mas comunes para "avanzar
--- texto" en SMW) con soltarlos, para no depender de saber con certeza cual
--- de los dos es en esta build en particular. Estos frames no se le mandan
--- al agente (no cuentan como decision suya ni como parte del episodio).
---
--- Limite de seguridad: si despues de MAX_DISMISS_ATTEMPTS ciclos el cartel
--- sigue sin cerrarse (direccion de memoria rara, cartel que necesita otro
--- boton, o cualquier estado que no previmos), esto se colgaria para
--- siempre -- sin este limite, nunca vuelve a mandar nada por el socket, y
--- del lado de C# el entrenamiento queda congelado en silencio sin generar
--- mas checkpoints, indistinguible de "no pasa nada". En vez de eso, se
--- fuerza un reset por savestate (mismo mecanismo que RESET_COMMAND) para
--- que el entrenamiento se recupere solo.
-local MAX_DISMISS_ATTEMPTS = 90 -- ~90 * (4+4) frames = ~12s a 60fps
 
--- Devuelve true si tuvo que forzar un reset por savestate (cartel que no se
--- cerro solo). El llamador debe tratar esto igual que un reset manual (avisar
--- a C# con manualReset=true), o el entrenamiento sigue evaluando el episodio
--- como si nada hubiera pasado, con Mario teletransportado de vuelta al inicio
--- sin que nadie lo note.
 local function dismissMessageBox()
     local attempts = 0
     while isMessageBoxActive() do
         attempts = attempts + 1
         if attempts > MAX_DISMISS_ATTEMPTS then
-            console.log("MarioBridge: cartel de dialogo no se cerro despues de " .. MAX_DISMISS_ATTEMPTS ..
-                " intentos; forzando reset por savestate para no colgar el entrenamiento.")
+            console.log("MarioBridge: cartel de dialogo no se cerro; forzando reset por savestate.")
             releaseAllButtons()
             savestate.load(currentSavestateFile())
             return true
@@ -165,21 +219,175 @@ local function dismissMessageBox()
     return false
 end
 
-local function getTile(marioX, marioY, dx, dy)
+local function getTileFull(marioX, marioY, dx, dy)
     local x = math.floor((marioX + dx) / 16)
     local y = math.floor((marioY + dy) / 16)
-    return memory.readbyte(0x1C800 + math.floor(x / 0x10) * 0x1B0 + y * 0x10 + x % 0x10)
+    local idx = math.floor(x / 0x10) * 0x1B0 + y * 0x10 + x % 0x10
+    local lo = memory.readbyte(0x1C800 + idx)
+    local hi = memory.readbyte(0x1D800 + idx)
+    return hi * 256 + lo
 end
+
+local function getTile(marioX, marioY, dx, dy)
+    return getTileFull(marioX, marioY, dx, dy) % 256
+end
+
+local COIN_TILE_LOW_BYTES = { [0x25] = true, [0x2B] = true, [0x5B] = true, [0x6B] = true }
+local COIN_BLOCK_LOW_BYTES = { [0x1B] = true, [0x23] = true }
+local DIALOG_TILE_FULL = { [0x0104] = true, [0x0105] = true, [0x0106] = true, [0x0107] = true }
+local PIPE_ENTRANCE_TILE_FULL = { [0x0137] = true, [0x0138] = true }
 
 local function buildTileGrid(marioX, marioY)
     local tiles = {}
     for dy = -GRID_RADIUS * 16, GRID_RADIUS * 16, 16 do
         for dx = -GRID_RADIUS * 16, GRID_RADIUS * 16, 16 do
             local tile = getTile(marioX, marioY, dx, dy)
-            tiles[#tiles + 1] = tile ~= 0 and "1" or "0"
+            tiles[#tiles + 1] = tostring(tile)
         end
     end
-    return table.concat(tiles)
+    return table.concat(tiles, ",")
+end
+
+local function buildCoinSignals(marioX, marioY)
+    local coinCount = 0
+    local coinDx, coinDy, coinBestSq = 0, 0, nil
+    local blockCount = 0
+    local blockDx, blockDy, blockBestSq = 0, 0, nil
+    for dy = -GRID_RADIUS * 16, GRID_RADIUS * 16, 16 do
+        for dx = -GRID_RADIUS * 16, GRID_RADIUS * 16, 16 do
+            local tile = getTile(marioX, marioY, dx, dy)
+            local distSq = dx * dx + dy * dy
+            if COIN_TILE_LOW_BYTES[tile] and (coinBestSq == nil or distSq < coinBestSq) then
+                coinCount = coinCount + 1
+                coinBestSq = distSq
+                coinDx = math.floor((marioX + dx) / 16) * 16 + 8 - marioX
+                coinDy = math.floor((marioY + dy) / 16) * 16 + 8 - marioY
+            end
+            if COIN_BLOCK_LOW_BYTES[tile] and (blockBestSq == nil or distSq < blockBestSq) then
+                blockCount = blockCount + 1
+                blockBestSq = distSq
+                blockDx = math.floor((marioX + dx) / 16) * 16 + 8 - marioX
+                blockDy = math.floor((marioY + dy) / 16) * 16 + 8 - marioY
+            end
+        end
+    end
+    return coinCount .. ";" .. coinDx .. ";" .. coinDy .. ";" .. blockCount .. ";" .. blockDx .. ";" .. blockDy
+end
+
+local function buildDialogSignals(marioX, marioY)
+    local dialogCount = 0
+    local dialogDx, dialogDy, dialogBestSq = 0, 0, nil
+    for dy = -GRID_RADIUS * 16, GRID_RADIUS * 16, 16 do
+        for dx = -GRID_RADIUS * 16, GRID_RADIUS * 16, 16 do
+            local tile = getTileFull(marioX, marioY, dx, dy)
+            local distSq = dx * dx + dy * dy
+            if DIALOG_TILE_FULL[tile] and (dialogBestSq == nil or distSq < dialogBestSq) then
+                dialogCount = dialogCount + 1
+                dialogBestSq = distSq
+                dialogDx = math.floor((marioX + dx) / 16) * 16 + 8 - marioX
+                dialogDy = math.floor((marioY + dy) / 16) * 16 + 8 - marioY
+            end
+        end
+    end
+    return dialogCount .. ";" .. dialogDx .. ";" .. dialogDy
+end
+
+local function buildPipeSignals(marioX, marioY)
+    local pipeCount = 0
+    local pipeDx, pipeDy, pipeBestSq = 0, 0, nil
+    for dy = -GRID_RADIUS * 16, GRID_RADIUS * 16, 16 do
+        for dx = -GRID_RADIUS * 16, GRID_RADIUS * 16, 16 do
+            local tile = getTileFull(marioX, marioY, dx, dy)
+            local distSq = dx * dx + dy * dy
+            if PIPE_ENTRANCE_TILE_FULL[tile] and (pipeBestSq == nil or distSq < pipeBestSq) then
+                pipeCount = pipeCount + 1
+                pipeBestSq = distSq
+                pipeDx = math.floor((marioX + dx) / 16) * 16 + 8 - marioX
+                pipeDy = math.floor((marioY + dy) / 16) * 16 + 8 - marioY
+            end
+        end
+    end
+    return pipeCount .. ";" .. pipeDx .. ";" .. pipeDy
+end
+
+local function buildCliffSignals(marioX, marioY)
+    local feetRow = math.floor((marioY + 16) / 16)
+    local gaps = {}
+    local inGap = false
+    local gapStart = 0
+    for col = 0, GRID_RADIUS do
+        local tx = math.floor(marioX / 16) + col
+        local open = true
+        for row = feetRow, feetRow + 4 do
+            local lo = memory.readbyte(0x1C800 + math.floor(tx / 0x10) * 0x1B0 + row * 0x10 + tx % 0x10)
+            if lo ~= 0 then
+                open = false
+                break
+            end
+        end
+        if open and not inGap then
+            inGap = true
+            gapStart = col
+        elseif not open and inGap then
+            gaps[#gaps + 1] = { start = gapStart, width = col - gapStart }
+            inGap = false
+        end
+    end
+    if inGap then
+        gaps[#gaps + 1] = { start = gapStart, width = GRID_RADIUS + 1 - gapStart }
+    end
+    local signals = {}
+    for i = 1, 2 do
+        if gaps[i] ~= nil then
+            signals[#signals + 1] = gaps[i].start
+            signals[#signals + 1] = gaps[i].width
+        else
+            signals[#signals + 1] = 0
+            signals[#signals + 1] = 0
+        end
+    end
+    return table.concat(signals, ";")
+end
+
+local function isVerticalLevel()
+    return memory.readbyte(0x1412) ~= 0 and 1 or 0
+end
+
+local function isSolidTile(tx, ty)
+    return memory.readbyte(0x1C800 + math.floor(tx / 0x10) * 0x1B0 + ty * 0x10 + tx % 0x10) ~= 0
+end
+
+local function buildWallSignals(marioX, marioY)
+    local marioCol = math.floor(marioX / 16)
+    local marioRow = math.floor(marioY / 16)
+    local feetRow = math.floor((marioY + 16) / 16)
+
+    local wallDistance = 0
+    for col = 1, GRID_RADIUS do
+        local tx = marioCol + col
+        if isSolidTile(tx, marioRow - 1) or isSolidTile(tx, marioRow) or isSolidTile(tx, feetRow) then
+            wallDistance = col
+            break
+        end
+    end
+
+    local aboveDistance = 0
+    for row = 1, GRID_RADIUS do
+        if isSolidTile(marioCol, marioRow - row) then
+            aboveDistance = row
+            break
+        end
+    end
+
+    local belowDistance = 0
+    for row = 1, GRID_RADIUS do
+        if isSolidTile(marioCol, feetRow + row) then
+            belowDistance = row
+            break
+        end
+    end
+
+    return wallDistance .. ";" .. aboveDistance .. ";" .. belowDistance
 end
 
 local function buildSpriteList()
@@ -189,24 +397,45 @@ local function buildSpriteList()
         if status ~= 0 then
             local x = memory.readbyte(0xE4 + slot) + memory.readbyte(0x14E0 + slot) * 256
             local y = memory.readbyte(0xD8 + slot) + memory.readbyte(0x14D4 + slot) * 256
+            local vx = readS8(0xB6 + slot)
+            local vy = readS8(0xAA + slot)
+            local direction = memory.readbyte(0x157C + slot)
+            local blocked = memory.readbyte(0x1588 + slot)
+            local offscreen = memory.readbyte(0x15A0 + slot)
             local spriteType = memory.readbyte(0x9E + slot)
-            sprites[#sprites + 1] = x .. "," .. y .. "," .. spriteType
+            local subX = memory.readbyte(0x14F8 + slot)
+            local subY = memory.readbyte(0x14EC + slot)
+            local stun = memory.readbyte(0x1540 + slot)
+            local props = memory.readbyte(0x167A + slot)
+            local misc1 = memory.readbyte(0x1504 + slot)
+            local misc2 = memory.readbyte(0x151C + slot)
+            local misc3 = memory.readbyte(0x1528 + slot)
+            local offscreenFull = memory.readbyte(0x15C4 + slot)
+            local eaten = memory.readbyte(0x15D0 + slot)
+            local objectInteraction = memory.readbyte(0x15DC + slot)
+            local spinTimer = memory.readbyte(0x15AC + slot)
+            sprites[#sprites + 1] = x .. "," .. y .. "," .. spriteType .. "," .. vx .. "," .. vy .. "," .. direction .. "," .. blocked .. "," .. offscreen .. "," .. subX .. "," .. subY .. "," .. status .. "," .. stun .. "," .. props .. "," .. misc1 .. "," .. misc2 .. "," .. misc3 .. "," .. offscreenFull .. "," .. eaten .. "," .. objectInteraction .. "," .. spinTimer
         end
     end
     return table.concat(sprites, ";")
 end
 
--- $7E:0x7D = velocidad vertical de Mario (ya la leiamos para MarioVelocityY).
--- El motor de SMW la fuerza a exactamente 0 en cada frame que Mario esta
--- parado sobre el piso (no en el aire, no saltando, no cayendo) - es la
--- misma logica que usa el juego internamente para decidir si Mario puede
--- volver a saltar. La usamos como señal directa de "grounded" en vez de
--- agregar una lectura de memoria nueva/no verificada: esto ya lo estabamos
--- leyendo de forma confiable, solo lo reinterpretamos.
---
--- Unico caso borde: en el frame exacto del apice de un salto, VelocityY
--- pasa por 0 un instante aunque Mario siga en el aire. Es un solo frame
--- ocasional de ruido, no afecta el aprendizaje de forma practica.
+local function buildClusterList()
+    local clusters = {}
+    for slot = 0, 19 do
+        local x = memory.readbyte(0x1E16 + slot) + memory.readbyte(0x1E3E + slot) * 256
+        local y = memory.readbyte(0x1E02 + slot) + memory.readbyte(0x1E2A + slot) * 256
+        if x ~= 0 or y ~= 0 then
+            clusters[#clusters + 1] = x .. "," .. y
+        end
+    end
+    return table.concat(clusters, ";")
+end
+
+local function backgroundLayerPositions()
+    return memory.read_s16_le(0x1E), memory.read_s16_le(0x20), memory.read_s16_le(0x22), memory.read_s16_le(0x24)
+end
+
 local function isGrounded(marioVY)
     return marioVY == 0
 end
@@ -214,18 +443,34 @@ end
 local function buildState(levelComplete, manualReset)
     local marioX, marioY = marioPosition()
     local marioVX, marioVY = marioVelocity()
+    local subX, subY = marioSubpixel()
+    local cameraX, cameraY = cameraPosition()
+    local layer2X, layer2Y, layer3X, layer3Y = backgroundLayerPositions()
+    local gameMode, levelMode, translevel = gameState()
+    local coins, itemBox = marioCollectibles()
+    local p1, p2, p3, p4 = controllerState()
+    local gameFrame, spriteFrame, lag = frameCounters()
+    local subSpeed = marioSubSpeed()
+    local reservedItem = marioReservedItemBox()
+    local c1Copy, c2Copy = marioControllerCopies()
+    local p2c1, p2c2, p2c1Prev, p2c2Prev = secondPlayerControllers()
+    local bluePow, silverPow = marioPowTimers()
+    local doorExit = doorExitCounter()
+    local itemMemoryValue = itemMemory()
+    local currentPlayer, character, currentPlayerCoins = currentPlayerState()
     local dead = isMarioDead() and "1" or "0"
     local lives = livesRemaining()
+    local carryingFlag, holdingObjectFlag = marioCarryFlags()
+    local midwayFlag, midwaySuppressed = midwayCheckpointFlags()
+    local yoshiCoins = yoshiCoinsCollected()
     local tiles = buildTileGrid(marioX, marioY)
     local sprites = buildSpriteList()
+    local clusters = buildClusterList()
     local grounded = isGrounded(marioVY) and "1" or "0"
     local powerup = marioPowerup()
 
-    -- powerup y levelIndex van al final, despues de los campos que ya
-    -- existian, para no correr de lugar nada que MarioCheckpointStore o
-    -- SnesState.Parse ya esperaban en una posicion fija.
     return table.concat({
-        emu.framecount(),
+        gameFrame,
         marioX,
         marioY,
         marioVX,
@@ -234,12 +479,73 @@ local function buildState(levelComplete, manualReset)
         lives,
         tiles,
         sprites,
+        clusters,
         grounded,
         levelComplete and "1" or "0",
         manualReset and "1" or "0",
         powerup,
-        currentLevelIndex
+        currentLevelIndex,
+        marioDirection(),
+        marioBlocked(),
+        subX,
+        subY,
+        marioAirState(),
+        marioDucking(),
+        marioClimbing(),
+        marioWater(),
+        marioPMeter(),
+        marioTakeoff(),
+        marioHurt(),
+        marioCape(),
+        bluePow,
+        silverPow,
+        doorExit,
+        cameraX,
+        cameraY,
+        layer2X,
+        layer2Y,
+        layer3X,
+        layer3Y,
+        gameMode,
+        levelMode,
+        translevel,
+        currentPlayer,
+        character,
+        itemMemoryValue,
+        currentPlayerCoins,
+        coins,
+        itemBox,
+        p1,
+        p2,
+        p3,
+        p4,
+        subSpeed,
+        reservedItem,
+        c1Copy,
+        c2Copy,
+        spriteFrame,
+        lag,
+        emu.framecount(),
+        p2c1,
+        p2c1Prev,
+        p2c2,
+        p2c2Prev,
+        buildCoinSignals(marioX, marioY),
+        buildDialogSignals(marioX, marioY),
+        buildCliffSignals(marioX, marioY),
+        carryingFlag,
+        holdingObjectFlag,
+        (midwayFlag ~= 0 and midwaySuppressed == 0) and 1 or 0,
+        yoshiCoins,
+        buildWallSignals(marioX, marioY),
+        isVerticalLevel(),
+        buildPipeSignals(marioX, marioY)
     }, "|")
+end
+
+local function loadLevel(index)
+    currentLevelIndex = index
+    savestate.load(currentSavestateFile())
 end
 
 local function applyAction(response)
@@ -247,18 +553,27 @@ local function applyAction(response)
         return true
     end
 
+    local resetIndex = tonumber(string.match(response, "^RESET:(%d+)$"))
+    if resetIndex ~= nil then
+        captureMode = false
+        loadLevel(resetIndex)
+        return false
+    end
+
     if response == RESET_COMMAND then
-        -- "RESET" a secas (sin ":<indice>"): recarga el nivel actual tal
-        -- cual estaba. Se mantiene por compatibilidad con cualquier version
-        -- vieja de C# que no mande indice de nivel.
+        captureMode = false
         savestate.load(currentSavestateFile())
         return false
     end
 
-    local requestedLevelIndex = string.match(response, "^RESET:(%d+)$")
-    if requestedLevelIndex ~= nil then
-        currentLevelIndex = tonumber(requestedLevelIndex)
-        savestate.load(currentSavestateFile())
+    local captureIndex = tonumber(string.match(response, "^CAPTURE:(%d+)$"))
+    if captureIndex ~= nil then
+        captureMode = true
+        loadLevel(captureIndex)
+        return false
+    end
+
+    if captureMode then
         return false
     end
 
@@ -288,7 +603,7 @@ while true do
     local response = comm.socketServerResponse()
     local shouldStop = applyAction(response)
     if shouldStop then
-        console.log("MarioBridge: entrenamiento finalizado, deteniendo script.")
+        console.log("MarioBridge: finalizado, deteniendo script.")
         break
     end
     emu.frameadvance()

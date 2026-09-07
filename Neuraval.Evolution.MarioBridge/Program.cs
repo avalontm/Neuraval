@@ -1,6 +1,3 @@
-using System;
-using System.IO;
-using System.Linq;
 using System.Net;
 using Neuraval.Evolution;
 using Neuraval.Evolution.Neat;
@@ -11,27 +8,149 @@ namespace Neuraval.Evolution.MarioBridge
     {
         private const string Address = "127.0.0.1";
         private const int Port = 8766;
-        private const int PopulationSize = 5;
+        private const int DefaultPopulationSize = 16;
         private const int MaxStepsPerEpisode = 1200;
+        private const string DefaultCheckpointPath = "checkpoints/mario_checkpoint.navm";
+        private const string DefaultModelPath = "checkpoints/mario_best.navm";
+        private const string DefaultCapturePath = "checkpoints/mario_dataset.navm";
+        private const string DefaultPolicyPath = "checkpoints/mario_policy.navm";
 
-        // Nombres solo para el log de consola -- no afectan el entrenamiento
-        // en nada (el indice numerico es lo que se manda a Lua, ver
-        // environment.LevelIndex mas abajo). Puse "DP1" tal cual el nombre
-        // del archivo que ya tenias (D:/_CODE_/BizHawk/DP1.state); no se a
-        // ciencia cierta que nivel es, cambialo por el nombre real si lo
-        // sabes, o dejalo generico. Tiene que tener la MISMA cantidad de
-        // entradas que SAVESTATE_FILES en mario_bridge.lua, en el mismo
-        // orden -- son dos archivos separados que no se sincronizan solos.
-        private static readonly string[] MarioLevels = { "Nivel 0 (DP1.state)" };
+        private static readonly string[] DefaultLevels = { "Nivel 0 (DP1.state)" };
 
         private static void Main(string[] args)
         {
-            var resetRequested = args.Any(arg => arg.Equals("--reset", StringComparison.OrdinalIgnoreCase));
-
-            var checkpointIndex = Array.FindIndex(args, arg => arg.Equals("--checkpoint", StringComparison.OrdinalIgnoreCase));
-            if (checkpointIndex >= 0 && checkpointIndex + 1 < args.Length)
+            var imitateDataset = GetOption(args, "--imitate");
+            if (imitateDataset != null)
             {
-                MarioCheckpointStore.SaveFilePath = args[checkpointIndex + 1];
+                var outputPath = GetOptionOr(args, "--imitate-out", DefaultPolicyPath);
+                var epochs = TryGetInt(GetOption(args, "--epochs"), 20);
+                RunImitationMode(imitateDataset, outputPath, epochs);
+                return;
+            }
+
+            var capturePath = GetOption(args, "--capture");
+            if (capturePath != null)
+            {
+                RunCaptureMode(capturePath);
+                return;
+            }
+
+            var populationSize = TryGetInt(GetOption(args, "--population"), DefaultPopulationSize);
+            RunTrainingMode(args, populationSize);
+        }
+
+        private static void RunCaptureMode(string capturePath)
+        {
+            using var connection = new SnesBridgeConnection(IPAddress.Parse(Address), Port);
+            var stopRequested = false;
+
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                stopRequested = true;
+                Console.WriteLine("\nDeteniendo captura y guardando dataset...");
+            };
+
+            Console.WriteLine($"Esperando conexion de BizHawk en {Address}:{Port}...");
+            connection.WaitForBizHawk();
+            Console.WriteLine("BizHawk conectado. Juega con el teclado: cada frame se graba junto con tus botones.");
+            Console.WriteLine("Muertes, fin de nivel y el reset manual (tecla Insert) reinician el nivel y cierran el episodio.");
+            Console.WriteLine("Ctrl+C para cerrar el dataset y salir.");
+
+            using var recorder = new MarioDatasetRecorder(capturePath);
+            var state = connection.ReceiveState();
+            int? previousX = null;
+            int? previousCoins = null;
+            int? previousPowerup = null;
+            var frames = 0;
+            var episodes = 0;
+
+            while (!stopRequested)
+            {
+                var action = MarioControllerEncoder.Decode(state.Controller1, state.Controller2);
+
+                if (state.IsDead || state.IsLevelComplete || state.ManualResetRequested)
+                {
+                    episodes++;
+                    recorder.Append(state, action, 0f, done: true);
+
+                    var reason = state.IsLevelComplete ? "nivel completado" : state.IsDead ? "muerte" : "reset manual";
+                    Console.WriteLine($"    Episodio {episodes} terminado ({reason}): marioX final {state.MarioX}.");
+
+                    connection.SendCapture(state.LevelIndex);
+                    previousX = null;
+                    previousCoins = null;
+                    previousPowerup = null;
+                }
+                else
+                {
+                    var reward = previousX.HasValue ? state.MarioX - previousX.Value : 0f;
+
+                    if (previousCoins.HasValue && state.Coins > previousCoins.Value)
+                    {
+                        reward += (state.Coins - previousCoins.Value) * SnesEnvironment.CoinReward;
+                    }
+
+                    if (previousPowerup.HasValue && state.PowerupLevel != previousPowerup.Value)
+                    {
+                        var powerupDelta = state.PowerupLevel - previousPowerup.Value;
+                        reward += powerupDelta > 0
+                            ? powerupDelta * SnesEnvironment.PowerupGainReward
+                            : powerupDelta * SnesEnvironment.PowerupLossPenalty;
+                    }
+
+                    previousX = state.MarioX;
+                    previousCoins = state.Coins;
+                    previousPowerup = state.PowerupLevel;
+                    recorder.Append(state, action, reward, done: false);
+                    frames++;
+
+                    connection.SendAction(SnesAction.None);
+                }
+
+                state = connection.ReceiveState();
+
+                if (frames > 0 && frames % 600 == 0)
+                {
+                    Console.WriteLine($"    Capturando... {frames} frames, {episodes} episodios.");
+                }
+            }
+
+            recorder.Complete();
+        }
+
+        private static void RunImitationMode(string datasetPath, string outputPath, int epochs)
+        {
+            Console.WriteLine($"Cargando dataset: {Path.GetFullPath(datasetPath)}");
+            var dataset = MarioDatasetLoader.Load(datasetPath);
+
+            if (dataset == null)
+            {
+                Console.WriteLine("No se pudo leer el dataset; se cancela el entrenamiento de imitacion.");
+                return;
+            }
+
+            Console.WriteLine($"Dataset: {dataset.Samples.Count} muestras, {dataset.InputCount} entradas, {dataset.OutputCount} salidas.");
+
+            var trainer = new MarioImitationTrainer(dataset, epochs);
+            var policy = trainer.Train(new Random(1234));
+            policy.Save(outputPath);
+
+            Console.WriteLine($"Politica guardada: {Path.GetFullPath(outputPath)}");
+            Console.WriteLine("Usa --seed-policy <archivo> al volver a entrenar por NEAT para arrancar desde esta politica.");
+        }
+
+        private static void RunTrainingMode(string[] args, int populationSize)
+        {
+            var resetRequested = args.Any(arg => arg.Equals("--reset", StringComparison.OrdinalIgnoreCase));
+            var checkpointPath = GetOption(args, "--checkpoint");
+            var seedPolicyPath = GetOption(args, "--seed-policy");
+            var exportModelPath = GetOptionOr(args, "--export-model", DefaultModelPath);
+            var levels = ResolveLevels(args);
+
+            if (checkpointPath != null)
+            {
+                MarioCheckpointStore.SaveFilePath = checkpointPath;
             }
 
             Console.WriteLine($"Archivo de entrenamiento: {Path.GetFullPath(MarioCheckpointStore.SaveFilePath)}");
@@ -49,8 +168,6 @@ namespace Neuraval.Evolution.MarioBridge
             {
                 if (stopRequested)
                 {
-                    // Segundo Ctrl+C: el usuario ya esperó y quiere salir ya.
-                    // No cancelamos el evento, asi el proceso termina de una.
                     Console.WriteLine("\nForzando cierre inmediato. El progreso de la generacion en curso puede perderse (el ultimo checkpoint guardado sigue intacto).");
                     return;
                 }
@@ -73,7 +190,7 @@ namespace Neuraval.Evolution.MarioBridge
             MarioAgent[] initialAgents;
             int startingGeneration;
             var bestFitnessEver = 0f;
-            NeatGenome bestGenomeEver = null;
+            NeatGenome? bestGenomeEver = null;
 
             if (checkpoint != null && checkpoint.Genomes.Count > 0)
             {
@@ -95,10 +212,14 @@ namespace Neuraval.Evolution.MarioBridge
             }
             else
             {
-                initialAgents = new MarioAgent[PopulationSize];
-                for (var i = 0; i < PopulationSize; i++)
+                var seedGenome = TryLoadSeedGenome(seedPolicyPath, tracker);
+
+                initialAgents = new MarioAgent[populationSize];
+                for (var i = 0; i < populationSize; i++)
                 {
-                    initialAgents[i] = MarioAgent.CreateRandom(random, tracker);
+                    initialAgents[i] = seedGenome != null && i == 0
+                        ? new MarioAgent(seedGenome.Clone())
+                        : MarioAgent.CreateRandom(random, tracker);
                 }
 
                 startingGeneration = 0;
@@ -122,17 +243,9 @@ namespace Neuraval.Evolution.MarioBridge
             {
                 generation++;
 
-                // Rotacion de niveles: TODA la poblacion de una generacion
-                // juega el mismo nivel (para que el fitness sea comparable
-                // entre genomas dentro de esa generacion), pero el nivel
-                // cambia de una generacion a la siguiente en orden (round
-                // robin). Con un solo nivel configurado esto no cambia nada
-                // respecto a antes -- agregar mas savestates en Lua y mas
-                // nombres en MarioLevels activa la rotacion sin tocar mas
-                // codigo.
-                environment.LevelIndex = MarioLevels.Length == 0 ? 0 : generation % MarioLevels.Length;
-                var levelLabel = environment.LevelIndex < MarioLevels.Length
-                    ? MarioLevels[environment.LevelIndex]
+                environment.LevelIndex = levels.Length == 0 ? 0 : generation % levels.Length;
+                var levelLabel = environment.LevelIndex < levels.Length
+                    ? levels[environment.LevelIndex]
                     : environment.LevelIndex.ToString();
                 Console.WriteLine($"-- Generacion {generation}: entrenando en \"{levelLabel}\" --");
 
@@ -146,10 +259,6 @@ namespace Neuraval.Evolution.MarioBridge
                     bestGenomeEver = population.Agents[bestIndex].Genome.Clone();
                 }
 
-                // Asegura que el mejor genoma de toda la corrida siempre
-                // sobreviva a la proxima generacion, sin importar como
-                // termine especiandose la poblacion (ver comentario en
-                // NeatEvolutionStrategy.GlobalBestGenome).
                 strategy.GlobalBestGenome = bestGenomeEver;
                 population.Advance();
                 Console.WriteLine($"{generation,10} | {strategy.LastSpeciesCount,8} | {population.AverageFitness,17:F2} | {population.BestFitness,13:F2}");
@@ -161,9 +270,74 @@ namespace Neuraval.Evolution.MarioBridge
                     BestGenomeEver = bestGenomeEver,
                     Genomes = population.Agents.Select(agent => agent.Genome).ToList()
                 });
+
+                if (bestGenomeEver != null)
+                {
+                    MarioNeatModelStore.Save(exportModelPath, bestGenomeEver);
+                }
             }
 
             Console.WriteLine("Entrenamiento detenido por el usuario. Progreso guardado.");
+        }
+
+        private static NeatGenome? TryLoadSeedGenome(string? seedPolicyPath, NeatInnovationTracker tracker)
+        {
+            if (seedPolicyPath == null)
+            {
+                return null;
+            }
+
+            var policy = MarioPolicyNetwork.Load(seedPolicyPath);
+            if (policy == null)
+            {
+                Console.WriteLine($"No se pudo cargar la politica semilla en {Path.GetFullPath(seedPolicyPath)}; se arranca con genomas random.");
+                return null;
+            }
+
+            Console.WriteLine($"Sembrando poblacion con politica imitada: {Path.GetFullPath(seedPolicyPath)}.");
+
+            var genome = policy.AsGenome(tracker);
+            var maxNodeId = genome.Nodes.Max(node => node.Id);
+            var maxInnovation = genome.Connections.Count - 1;
+            tracker.FastForwardTo(maxNodeId + 1, maxInnovation + 1);
+            return genome;
+        }
+
+        private static string[] ResolveLevels(string[] args)
+        {
+            var levels = new List<string>();
+
+            for (var i = 0; i + 1 < args.Length; i++)
+            {
+                if (args[i].Equals("--level", StringComparison.OrdinalIgnoreCase))
+                {
+                    levels.Add(args[i + 1]);
+                    i++;
+                }
+            }
+
+            return levels.Count > 0 ? levels.ToArray() : (string[])DefaultLevels.Clone();
+        }
+
+        private static string? GetOption(string[] args, string name)
+        {
+            var index = Array.FindIndex(args, arg => arg.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0 && index + 1 < args.Length)
+            {
+                return args[index + 1];
+            }
+
+            return null;
+        }
+
+        private static string GetOptionOr(string[] args, string name, string fallback)
+        {
+            return GetOption(args, name) ?? fallback;
+        }
+
+        private static int TryGetInt(string? value, int fallback)
+        {
+            return int.TryParse(value, out var parsed) ? parsed : fallback;
         }
     }
 }

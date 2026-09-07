@@ -9,6 +9,7 @@ namespace Neuraval.Evolution.MarioBridge
     {
         private const string ResetCommand = "RESET";
         private const string StopCommand = "STOP";
+        private const string CaptureCommand = "CAPTURE";
 
         private readonly TcpListener _listener;
         private readonly byte[] _buffer = new byte[1 << 16];
@@ -49,6 +50,11 @@ namespace Neuraval.Evolution.MarioBridge
         public void SendReset(int? levelIndex = null)
         {
             SendMessage(levelIndex.HasValue ? $"{ResetCommand}:{levelIndex.Value}" : ResetCommand);
+        }
+
+        public void SendCapture(int levelIndex)
+        {
+            SendMessage($"{CaptureCommand}:{levelIndex}");
         }
 
         public void SendStop()

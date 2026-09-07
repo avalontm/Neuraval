@@ -11,7 +11,7 @@ namespace Neuraval.Core.Serialization
     /// <summary>
     /// Guarda y carga modelos <see cref="TransformerModel"/> completos (pesos +
     /// estado de los optimizadores) usando el formato binario propietario
-    /// <c>.ncbm</c> descrito en <see cref="ModelBinaryFormat"/>.
+    /// <c>.navm</c> descrito en <see cref="ModelBinaryFormat"/>.
     /// </summary>
     public static class ModelBinarySerializer
     {
@@ -22,7 +22,7 @@ namespace Neuraval.Core.Serialization
 
         /// <summary>
         /// Serializa <paramref name="modelState"/> y lo escribe en
-        /// <paramref name="filePath"/> con el formato <c>.ncbm</c>.
+        /// <paramref name="filePath"/> con el formato <c>.navm</c>.
         /// </summary>
         /// <param name="compress">
         /// Si es <c>true</c> (default), el cuerpo binario se comprime con GZip.
@@ -78,7 +78,7 @@ namespace Neuraval.Core.Serialization
             header.Compressed = compress;
             byte[] headerJson = JsonSerializer.SerializeToUtf8Bytes(header, HeaderJsonOptions);
 
-            // Escribir a un archivo temporal y luego mover: evita dejar un .ncbm
+            // Escribir a un archivo temporal y luego mover: evita dejar un .navm
             // corrupto/a medio escribir si el proceso se interrumpe justo al guardar
             // un checkpoint (buena práctica para archivos que se sobrescriben seguido).
             var tempPath = filePath + ".tmp";
@@ -100,7 +100,7 @@ namespace Neuraval.Core.Serialization
         }
 
         /// <summary>
-        /// Carga un archivo <c>.ncbm</c> completo: valida la firma, la versión
+        /// Carga un archivo <c>.navm</c> completo: valida la firma, la versión
         /// de formato y el checksum, y devuelve tanto los pesos como el
         /// encabezado con los metadatos del modelo.
         /// </summary>
@@ -142,7 +142,7 @@ namespace Neuraval.Core.Serialization
         }
 
         /// <summary>
-        /// Lee únicamente el encabezado JSON de un archivo <c>.ncbm</c> (arquitectura,
+        /// Lee únicamente el encabezado JSON de un archivo <c>.navm</c> (arquitectura,
         /// metadatos, si está comprimido, etc.) sin decodificar los pesos. Útil para
         /// listar o inspeccionar modelos guardados sin pagar el costo de cargarlos.
         /// </summary>
@@ -163,8 +163,8 @@ namespace Neuraval.Core.Serialization
             return header;
         }
 
-        /// <summary>Indica si el archivo dado parece ser un modelo <c>.ncbm</c> válido.</summary>
-        public static bool IsNcbmFile(string filePath)
+        /// <summary>Indica si el archivo dado parece ser un modelo <c>.navm</c> válido.</summary>
+        public static bool IsNavmFile(string filePath)
         {
             try
             {

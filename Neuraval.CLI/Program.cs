@@ -342,7 +342,7 @@ Asistente: el resultado es cuatro");
 
             if (!modelLoaded)
             {
-                Console.WriteLine("No se pudo cargar el modelo. Revisa que la carpeta tenga model.ncbm y tokenizer.json.");
+                Console.WriteLine("No se pudo cargar el modelo. Revisa que la carpeta tenga model.navm y tokenizer.json.");
                 return;
             }
 

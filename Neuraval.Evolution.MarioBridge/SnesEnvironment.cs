@@ -2,15 +2,16 @@ namespace Neuraval.Evolution.MarioBridge
 {
     public sealed class SnesEnvironment : IEnvironment<SnesState, SnesAction>
     {
+        internal const float CoinReward = 50f;
+        internal const float PowerupGainReward = 200f;
+        internal const float PowerupLossPenalty = 150f;
+
         private readonly SnesBridgeConnection _connection;
         private int _previousMarioX;
+        private int _previousCoins;
+        private int _previousPowerup;
         private bool _connected;
 
-        // Que nivel/savestate pedir en el proximo Reset(). Program.cs lo
-        // actualiza antes de evaluar cada generacion (ver rotacion de
-        // niveles ahi); si nadie lo toca, queda en 0 y siempre se entrena
-        // sobre el primer savestate configurado en Lua, igual que antes de
-        // esta funcionalidad.
         public int LevelIndex { get; set; }
 
         public SnesEnvironment(SnesBridgeConnection connection)
@@ -28,7 +29,11 @@ namespace Neuraval.Evolution.MarioBridge
 
             _connection.SendReset(LevelIndex);
             var state = _connection.ReceiveState();
+
             _previousMarioX = state.MarioX;
+            _previousCoins = state.Coins;
+            _previousPowerup = state.PowerupLevel;
+
             return state;
         }
 
@@ -36,8 +41,29 @@ namespace Neuraval.Evolution.MarioBridge
         {
             _connection.SendAction(action);
             var state = _connection.ReceiveState();
-            var reward = state.MarioX - _previousMarioX;
+
+            var reward = (float)(state.MarioX - _previousMarioX);
+            var coinGain = state.Coins - _previousCoins;
+            var powerupDelta = state.PowerupLevel - _previousPowerup;
+
+            if (coinGain > 0)
+            {
+                reward += coinGain * CoinReward;
+            }
+
+            if (powerupDelta > 0)
+            {
+                reward += powerupDelta * PowerupGainReward;
+            }
+            else if (powerupDelta < 0)
+            {
+                reward += powerupDelta * PowerupLossPenalty;
+            }
+
             _previousMarioX = state.MarioX;
+            _previousCoins = state.Coins;
+            _previousPowerup = state.PowerupLevel;
+
             var done = state.IsDead || state.IsLevelComplete || state.ManualResetRequested;
             return new EnvironmentStepResult<SnesState>(state, reward, done);
         }

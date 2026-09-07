@@ -7,7 +7,7 @@ namespace Neuraval.Core.Serialization
     /// entrenados de un <see cref="Models.TransformerModel"/> (y el estado de
     /// sus optimizadores Adam) en un único archivo compacto.
     ///
-    /// Extensión oficial: <c>.ncbm</c> ("Neuraval Binary Model").
+    /// Extensión oficial: <c>.navm</c> ("Neural Avalon Model").
     ///
     /// Layout del archivo en disco (little-endian; todo escrito con
     /// <see cref="System.IO.BinaryWriter"/>):
@@ -15,7 +15,7 @@ namespace Neuraval.Core.Serialization
     /// <code>
     ///   Offset   Tamaño   Campo
     ///   ------   ------   -----------------------------------------------------
-    ///   0        4        Magic          -> bytes ASCII "NCBM"
+    ///   0        4        Magic          -> bytes ASCII "NAVM"
     ///   4        2        FormatVersion  -> ushort, versión del layout del Body
     ///   6        1        Flags          -> byte (bit 0 = Body comprimido con GZip)
     ///   7        1        Reserved       -> byte, siempre 0 (uso futuro)
@@ -46,10 +46,10 @@ namespace Neuraval.Core.Serialization
     public static class ModelBinaryFormat
     {
         /// <summary>Extensión de archivo oficial del formato.</summary>
-        public const string FileExtension = ".ncbm";
+        public const string FileExtension = ".navm";
 
         /// <summary>Firma mágica que identifica el archivo como un modelo Neuraval.</summary>
-        public static readonly byte[] MagicBytes = { (byte)'N', (byte)'C', (byte)'B', (byte)'M' };
+        public static readonly byte[] MagicBytes = { (byte)'N', (byte)'A', (byte)'V', (byte)'M' };
 
         /// <summary>
         /// Versión actual del layout binario del Body (pesos + optimizadores).
