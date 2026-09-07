@@ -81,12 +81,18 @@ Neuraval/
 ├── Neuraval.Evolution/ (generic genetic/RL lab, no game inside)
 │   ├── IEnvironment.cs / IAgent.cs / IFitnessEvaluator.cs
 │   ├── IEvolutionStrategy.cs
-│   └── Population.cs
+│   ├── Population.cs
+│   └── Serialization/
+│       ├── NavmBinaryFormat.cs
+│       └── NavmBinarySerializer.cs
 │
-├── Neuraval.Evolution.DinoDemo/ (standalone console demo, reuses FeedForwardNetwork as its small policy network)
-│   ├── DinoEnvironment.cs
-│   ├── DinoAgent.cs
-│   └── Program.cs
+├── Neuraval.Evolution.MarioBridge/ (SMW agent via BizHawk Lua bridge)
+│   ├── Program.cs (CLI: --reset / --checkpoint / --capture / --imitate / --seed-policy / --export-model / --population / --level)
+│   ├── MarioAgent.cs / MarioStateEncoder.cs / MarioAgentOutput.cs
+│   ├── MarioCheckpointStore.cs / MarioNeatModelStore.cs / MarioGenomeSerializer.cs
+│   ├── MarioDataset.cs / MarioPolicyNetwork.cs / MarioImitationTrainer.cs
+│   ├── SnesBridgeConnection.cs / SnesEnvironment.cs / MarioFitnessEvaluator.cs
+│   └── MarioControllerEncoder.cs
 │
 ├── Neuraval.Samples.DinoGame/ (graphical MonoGame sample, ported from the standalone "GameNeuronal" project)
 │   ├── MainGame.cs
@@ -122,27 +128,19 @@ This only makes sense once there's a second backend you actually want to use (an
 
 Nothing in `Neuraval.CLI`, `Neuraval.ChatBot`, or any existing backend needs to change — the new project, the factory branch, and the config field added at that point are the only touch points.
 
-## Evolutionary lab (Dino demo)
+## Evolutionary lab
 
 `Neuraval.Evolution` is a standalone, generic library for problems with an automatically measurable reward (game-playing agents, not chat) — `IEnvironment`, `IAgent`, `IFitnessEvaluator`, `IEvolutionStrategy` and `Population<TAgent, TState, TAction>` know nothing about Dinosaurs, Transformers, or chat.
 
-`Neuraval.Evolution.DinoDemo` is a console clone of the Chrome offline dino game used as a reference implementation: `DinoEnvironment` simulates the jump/obstacle physics, and `DinoAgent` decides Run/Jump using `FeedForwardNetwork` from the core project as its small policy network (input: distance to the next obstacle, its approach speed, vertical velocity, height above ground). Evolution works directly off what `FeedForwardNetwork` already exposes — `SaveState()`/`LoadState()` — mutating the flattened weight arrays with Gaussian noise instead of training by backprop.
-
-Run it with:
-
-```bash
-dotnet run --project Neuraval.Evolution.DinoDemo
-```
-
-You'll see average and best fitness per generation climb over 40 generations as the population improves at clearing obstacles. It's fully decoupled from the chatbot — it doesn't reference `Neuraval.ChatBot`, `Neuraval.CLI`, or `Neuraval.Abstractions` at all.
+It's implemented against `FeedForwardNetwork` from the core project as a small policy network; evolution works directly off what `FeedForwardNetwork` already exposes — `SaveState()`/`LoadState()` — mutating the flattened weight arrays with Gaussian noise instead of training by backprop. The library is fully decoupled from the chatbot — it doesn't reference `Neuraval.ChatBot`, `Neuraval.CLI`, or `Neuraval.Abstractions` at all.
 
 ## Sample: GameNeuronal (graphical Dino game)
 
-`Neuraval.Samples.DinoGame` is the graphical counterpart to the console `DinoDemo` above: a MonoGame clone of the Chrome offline dino game (sprites, animation, obstacles, debug overlay), originally a separate project ("GameNeuronal") that has been folded into this solution as a sample.
+`Neuraval.Samples.DinoGame` is a MonoGame clone of the Chrome offline dino game (sprites, animation, obstacles, debug overlay), originally a separate project ("GameNeuronal") that has been folded into this solution as a sample.
 
-It used to depend on `Accord.Neuro`/`Accord.Statistics` for its neural network. That dependency has been removed — it now uses `FeedForwardNetwork` from `Neuraval.Core.Models` (this repo's own engine, the same class `DinoAgent` uses in `Neuraval.Evolution.DinoDemo`), via a `ProjectReference` to `Neuraval.csproj`. No third-party neural network library is involved anywhere in this solution anymore. MonoGame itself is kept, since it's what actually renders the game — without it this would just be the console demo again.
+It used to depend on `Accord.Neuro`/`Accord.Statistics` for its neural network. That dependency has been removed — it now uses `FeedForwardNetwork` from `Neuraval.Core.Models` (this repo's own engine), via a `ProjectReference` to `Neuraval.csproj`. No third-party neural network library is involved anywhere in this solution anymore. MonoGame itself is kept, since it's what actually renders the game.
 
-Each dinosaur spawns with its own randomly-initialized `FeedForwardNetwork` (7 game-state inputs — obstacle distance/position/size, dino height, game speed — mapped to a jump/duck decision read off the first two outputs). Like the original, this sample doesn't train or evolve the weights; it's a structural demo of wiring a neural net's raw output into game decisions, not a trained agent. If you want an agent that actually gets better over time, see the `DinoDemo` evolutionary lab above.
+Each dinosaur spawns with its own randomly-initialized `FeedForwardNetwork` (7 game-state inputs — obstacle distance/position/size, dino height, game speed — mapped to a jump/duck decision read off the first two outputs). Like the original, this sample doesn't train or evolve the weights; it's a structural demo of wiring a neural net's raw output into game decisions, not a trained agent.
 
 Run it with (Windows only, needs the MonoGame/WindowsDesktop workload):
 
@@ -152,13 +150,78 @@ dotnet run --project Neuraval.Samples.DinoGame
 
 Controls: `F1` toggles the debug overlay, `Esc` restarts once every dinosaur has died.
 
+## SMW Agent: Mario Bridge
+
+`Neuraval.Evolution.MarioBridge` entrena agentes NEAT para super Mario World controlando BizHawk a través de un bridge Lua por TCP (`127.0.0.1:8766`). El agente percibe la RAM P0+P1 (tilemap, estado de Mario, cámara, sprites, moneda Yoshi más cercana, item sostenible/sostenido y checkpoint) codificada en un vector de **326 entradas** y actúa con **7 salidas** (Izquierda, Derecha, A, B, Y, Abajo, Arriba).
+
+El tilemap (13×13 alrededor de Mario) envía el **valor crudo del Map16** (0–255 normalizado a 0..1) en vez de binario, así la red distingue ladrillos, bloques `?`, monedas y suelo. Además hay bloques de señales de colección y navegación:
+- Monedas y bloques-moneda: nº cerca y offset del más cercano (monedas: tiles `$025/$02B/$05B/$06B`; bloques-moneda: `$11B/$123`).
+- **Bloques de diálogo** (Map16 completo `$0104-$0107`): nº cerca y offset, para que el modelo evite golpearlos y no se abra el mensaje.
+- **Acantilados**: los 2 huecos más próximos hacia delante, cada uno como (distancia en tiles, anchura en tiles) usando el tile de los pies + 4 filas debajo — el modelo sabe cuándo y cuánto hay que correr y saltar.
+
+Los tres allowlists son heurísticos y se deben calibrar contra una captura real del nivel DP1 vanilla.
+
+### Formato binario `.navm`
+
+Todos los artefactos del proyecto se guardan en el contenedor binario universal `.navm`:
+
+```
+magic "NAVM" (4) | version (u16) | flags (u8) | reserved (u8)
+headerLen (i32) | header JSON (UTF-8) | bodyLen (i32) | body (GZip opcional) | SHA-256 (32)
+```
+
+Se escribe de forma atómica (fichero temporal + rename). El header JSON de cada artefacto (checkpoint, modelo NEAT aislado, dataset, política) valida la compatibilidad — ante un cambio de InputCount/OutputCount, los checkpoints antiguos se archivan automáticamente en vez de corromperse.
+
+### Pipeline de Imitation Learning
+
+1. `--capture <dataset.navm>`: graba tus partidas desde BizHawk (estado + botones + recompensa por frame), cerrando episodio en muerte/nivel completado/reset manual. La recompensa por frame reproduce el shaping del entorno evolutivo: avance horizontal + monedas (×50) + power-up (ganancia ×200, pérdida −150).
+2. `--imitate <dataset.navm> [--epochs N] [--imitate-out policy.navm]`: entrena una política (MLP) por imitación con BCE. La pérdida de cada muestra se **pondera por su recompensa** (pesos 1–3 normalizados por min-max), de modo que el modelo imita con más fuerza las jugadas "buenas" (avanzar, recoger monedas/power-ups). Además hay split de **validación 90/10**, se restaura el epoch con mejor val-BCE y **early stopping** con paciencia 5 — el `--imitate-out` guarda siempre la política del mejor val-loss.
+3. `--seed-policy policy.navm`: siembra la población NEAT con la política imitada en el siguiente entrenamiento evolutivo.
+
+### Ejecución del entrenamiento evolutivo
+
+```bash
+# Entrenamiento principal (espera a BizHawk en 127.0.0.1:8766)
+dotnet run --project Neuraval.Evolution.MarioBridge
+
+# Reanudar con un checkpoint alternativo
+dotnet run --project Neuraval.Evolution.MarioBridge -- --checkpoint mi_checkpoint.navm
+
+# Empezar de cero (borra el progreso anterior)
+dotnet run --project Neuraval.Evolution.MarioBridge -- --checkpoint mi_checkpoint.navm --reset
+
+# Exportar el mejor genoma a un modelo autocontenido
+dotnet run --project Neuraval.Evolution.MarioBridge -- --export-model checkpoints/mario_best.navm
+
+# Modo captura de dataset para Imitation Learning
+dotnet run --project Neuraval.Evolution.MarioBridge -- --capture checkpoints/mario_dataset.navm
+
+# Entrenar la política imitada
+dotnet run --project Neuraval.Evolution.MarioBridge -- --imitate checkpoints/mario_dataset.navm --epochs 20 --imitate-out checkpoints/mario_policy.navm
+```
+
+Opciones de entrenamiento evolutivo:
+
+```bash
+# Tamaño de población (default 16; poblaciones más grandes exploran mejor pero alargan cada generación)
+dotnet run --project Neuraval.Evolution.MarioBridge -- --population 20
+
+# Rotar entre varios niveles/savestates por generación (curriculum). Repite el flag por cada nivel,
+# el índice es el mismo que usa mario_bridge.lua para cargar los savestates.
+dotnet run --project Neuraval.Evolution.MarioBridge -- --level "Nivel 0 (DP1.state)" --level "Nivel 1 (medio.state)" --level "Nivel 2 (final.state)"
+```
+
+Sin `--level`, se usa el nivel por defecto. El elitismo por especie requiere `MinSpeciesSizeForElite = 3` y conserva `EliteCountPerSpecies = 2`; el mejor genoma histórico siempre re-siembra la población en el slot 0.
+
+El fitness por generación combina avance horizontal con bonificaciones (nivel completado, power-ups, monedas, monedas Yoshi con bonus por juntar las 5, checkpoint/punto medio) y penalizaciones (daño recibido, muerte). El `mario_bridge.lua` implementa el protocolo v12 (70 campos) con los comandos `RESET`, `CAPTURE` y `STOP`, incluyendo status/stun/flags/misc de sprites, off-screen full/eaten/interacción objeto/timer giro, cluster sprites, capas 2/3, segundo jugador, timers de POW/door/player, tilemap con valores crudos de Map16, senales de monedas/bloques-moneda, bloques de dialogo (Map16 completo `$0104-$0107`), acantilados (2 huecos: distancia+anchura), banderas de item sostenido/sostenible ($1470/$148F + status $14C8), checkpoint de punto medio ($13CE/$13CD), contador de monedas Yoshi ($1420), señales de pared/hueco vertical (distancia en tiles a la primera pared sólida hacia la derecha a la altura del cuerpo de Mario, y a la primera plataforma sólida arriba/abajo en la columna de Mario, escaneando hasta `GridRadius` tiles; 0 = nada detectado en rango), bandera de nivel vertical (`$7E:1412`, scroll vertical habilitado/condicional, colapsado a 0/1) y señal de tubería vertical transitable cercana (Map16 completo `$0137`/`$0138`, tiles superiores de tubería exit-enabled). Los datasets e checkpoints grabados con el protocolo v11 quedan obsoletos por el cambio de entradas (323→326) y deben recapturarse. Los datasets e checkpoints grabados con el protocolo v8 quedan obsoletos por el cambio de entradas (298→307) y salidas (6→7, se agrega Arriba) y deben recapturarse. El campo `Blocked` de Mario ($7E:0077, formato `SxxMUDLR`) y el de cada sprite cercano ($7E:1588, formato `xxxxUDLR`) ya no se pasan crudos/bitmask a la red: se decodifican en 4 señales binarias por bloque (izquierda/derecha/arriba/abajo), lo que sube el vector de entradas de 307 a **319** sin tocar el wire protocol (protocolo v9, 67 campos, sin cambios).
+
 ## Running the tests
 
 ```bash
 dotnet test Neuraval.Tests
 ```
 
-Covers: `ChatModelFactory` returning the right `IChatModel` (and matching a model loaded directly, byte-for-byte in its generated response), and `SupervisedTrainer.Train` (the `ITrainer` entry point) producing identical training/validation losses and predictions to calling `TrainCausalWithValidation` directly — confirming the Fase 2 migration didn't change training behavior.
+Covers: `ChatModelFactory` returning the right `IChatModel` (and matching a model loaded directly, byte-for-byte in its generated response), `SupervisedTrainer.Train` (the `ITrainer` entry point) producing identical training/validation losses and predictions to calling `TrainCausalWithValidation` directly — confirming the Fase 2 migration didn't change training behavior — and the `.navm` container round-trip (compresión, checksum corrupto, magic inválido), el contador de entradas del `MarioStateEncoder` (326), las señales de monedas/bloques-moneda/diálogo/acantilados/moneda-Yoshi/item-sostenido/checkpoint y los tiles crudos, la decodificación del controller, la ponderación por recompensa del `MarioRewardWeighting` y que `MarioImitationTrainer` lleva la política hacia la máscara de botones objetivo.
 
 ## Key Features
 

@@ -12,8 +12,8 @@ namespace Neuraval.Evolution.Neat
         public float AddConnectionRate { get; init; } = 0.08f;
         public float AddNodeRate { get; init; } = 0.03f;
         public float CrossoverRate { get; init; } = 0.75f;
-        public int EliteCountPerSpecies { get; init; } = 1;
-        public int MinSpeciesSizeForElite { get; init; } = 5;
+        public int EliteCountPerSpecies { get; init; } = 2;
+        public int MinSpeciesSizeForElite { get; init; } = 3;
         public int AddConnectionMaxAttempts { get; init; } = 20;
     }
 }

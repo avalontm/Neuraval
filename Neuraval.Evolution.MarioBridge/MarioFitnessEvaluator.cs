@@ -1,15 +1,5 @@
-using System;
-using Neuraval.Evolution;
-
 namespace Neuraval.Evolution.MarioBridge
 {
-    // Por que termino el episodio, mas alla de "murio si/no". No lo tenemos
-    // 100% verificado a nivel de direccion de RAM (ver ClassifyDeath para el
-    // porque), asi que por ahora es solo para consola/estadisticas, no
-    // afecta el fitness. Si mas adelante se quiere que la evolucion evite
-    // mas un tipo de muerte que otro (por ejemplo, penalizar caidas al vacio
-    // mas que golpes de enemigo), ese es un ajuste a proposito sobre este
-    // dato, no algo que convenga inventar aca sin que alguien lo pida.
     public enum MarioDeathCause
     {
         None,
@@ -19,42 +9,28 @@ namespace Neuraval.Evolution.MarioBridge
 
     public sealed class MarioFitnessEvaluator : IFitnessEvaluator<MarioAgent, SnesState, SnesAction>
     {
-        private readonly int _maxSteps;
-
-        // Umbral de "habia algo pegado a Mario" para clasificar una muerte
-        // como "por enemigo". No es una hitbox real de SMW (esas varian por
-        // sprite y no las tenemos mapeadas con confianza) -- es una
-        // aproximacion practica: si el sprite mas cercano en el ultimo frame
-        // vivo estaba a 20px o menos (mas o menos 1 tile y un poco), es
-        // razonable asumir contacto. Puede haber falsos negativos (un
-        // enemigo que empujo a Mario y ya se alejo un frame antes de que
-        // muriera) y no distingue lava/pinchos/munchers de una caida real
-        // al vacio (ninguno de los dos tiene sprite propio) -- ambos quedan
-        // como FallOrHazard. Es una heuristica sobre datos que YA leiamos de
-        // forma confiable (posicion de Mario, lista de sprites), no una
-        // direccion de RAM nueva sin verificar.
         private const float EnemyContactRadius = 20f;
-
-        // Bonus grande y plano cuando el agente termina el episodio por
-        // completar el nivel (no por morir ni por reset manual). bestX ya
-        // premia avanzar, pero sin esto a la evolucion le da lo mismo
-        // "casi llegar" que "llegar" - este empujon hace que terminar el
-        // nivel sea claramente mejor que cualquier bestX intermedio.
         private const float LevelCompleteBonus = 5000f;
-
-        // Si Mario no mejora su bestX durante esta cantidad de pasos
-        // seguidos, cortamos el episodio ahi mismo en vez de esperar el
-        // techo completo de _maxSteps. La red es determinista: si la
-        // entrada no cambia (Mario quieto, sin sprites cerca que perturben
-        // el calculo), la salida tampoco cambia, y el genoma queda en un
-        // punto fijo del que nunca sale solo. Sin este corte, cada genoma
-        // "congelado" gasta el episodio entero (1200 pasos) mirando a la
-        // nada; con el corte, sale del cuadro rapido y el entrenamiento
-        // hace mas generaciones por hora. 300 pasos (~5s a 60fps) alcanza
-        // para que un genoma que si esta progresando (aunque sea lento, o
-        // parado un instante esperando el timing de un salto) no se corte
-        // de mas.
+        private const float PowerupGainWorth = 80f;
+        private const float CoinWorth = 25f;
+        private const float DamagePenalty = 20f;
+        private const float DeathPenalty = 250f;
         private const int StagnationStepLimit = 300;
+
+        // Monedas Yoshi ($7E:1420): valen mucho mas que una moneda normal
+        // porque suelen requerir desviarse del camino/explorar, y coleccionar
+        // las 5 de un nivel da un bonus extra grande para incentivar barrer
+        // el nivel completo en vez de solo correr a la meta.
+        private const float YoshiCoinWorth = 150f;
+        private const int YoshiCoinsPerLevel = 5;
+        private const float AllYoshiCoinsBonus = 1000f;
+
+        // Punto medio / checkpoint ($7E:13CE): recompensa por activarlo, para
+        // que la IA aprenda a pisar la barra de mitad de nivel (guarda el
+        // progreso de respawn) en vez de ignorarla.
+        private const float MidwayPointBonus = 300f;
+
+        private readonly int _maxSteps;
 
         public MarioFitnessEvaluator(int maxSteps)
         {
@@ -66,7 +42,19 @@ namespace Neuraval.Evolution.MarioBridge
             var state = environment.Reset();
             var bestX = state.MarioX;
             var stepsSinceProgress = 0;
-            var deathCause = MarioDeathCause.None;
+            var deathInfo = NoDeath;
+
+            var previousPowerup = state.PowerupLevel;
+            var previousCoins = state.Coins;
+            var previousHurt = state.HurtTimer;
+            var previousYoshiCoins = state.YoshiCoinsCollected;
+            var previousMidway = state.MidwayPointReached;
+            var powerupGains = 0;
+            var coinGains = 0;
+            var damageHits = 0;
+            var yoshiCoinGains = 0;
+            var maxYoshiCoinsSeen = state.YoshiCoinsCollected;
+            var reachedMidway = state.MidwayPointReached;
 
             for (var step = 0; step < _maxSteps; step++)
             {
@@ -85,22 +73,50 @@ namespace Neuraval.Evolution.MarioBridge
                     stepsSinceProgress++;
                 }
 
-                // Solo clasificamos en la transicion "vivo -> muerto" (la
-                // primera vez que lo vemos), usando el ultimo estado vivo:
-                // una vez muerto, la posicion de Mario y la lista de sprites
-                // ya no reflejan el momento del golpe, sino la animacion de
-                // muerte en curso.
-                if (state.IsDead && deathCause == MarioDeathCause.None)
+                var powerupDelta = state.PowerupLevel - previousPowerup;
+                if (powerupDelta > 0)
                 {
-                    deathCause = ClassifyDeath(previousState);
+                    powerupGains += powerupDelta;
                 }
 
-                // El episodio se corta si Mario muere, si completa el nivel
-                // (llega a la meta), si se pidio un reset manual desde
-                // BizHawk, o si se quedo sin progresar demasiado tiempo
-                // (genoma "congelado" en un punto fijo). _maxSteps sigue
-                // siendo un techo de seguridad para no quedarse atado a un
-                // agente para siempre si nada de eso pasa.
+                var coinDelta = state.Coins - previousCoins;
+                if (coinDelta > 0)
+                {
+                    coinGains += coinDelta;
+                }
+
+                if (state.HurtTimer > 0 && previousHurt == 0)
+                {
+                    damageHits++;
+                }
+
+                var yoshiCoinDelta = state.YoshiCoinsCollected - previousYoshiCoins;
+                if (yoshiCoinDelta > 0)
+                {
+                    yoshiCoinGains += yoshiCoinDelta;
+                }
+
+                if (state.YoshiCoinsCollected > maxYoshiCoinsSeen)
+                {
+                    maxYoshiCoinsSeen = state.YoshiCoinsCollected;
+                }
+
+                if (state.MidwayPointReached && !previousMidway)
+                {
+                    reachedMidway = true;
+                }
+
+                previousPowerup = state.PowerupLevel;
+                previousCoins = state.Coins;
+                previousHurt = state.HurtTimer;
+                previousYoshiCoins = state.YoshiCoinsCollected;
+                previousMidway = state.MidwayPointReached;
+
+                if (state.IsDead && deathInfo.Cause == MarioDeathCause.None)
+                {
+                    deathInfo = ClassifyDeath(previousState);
+                }
+
                 if (result.Done || stepsSinceProgress >= StagnationStepLimit)
                 {
                     break;
@@ -114,18 +130,43 @@ namespace Neuraval.Evolution.MarioBridge
                 fitness += LevelCompleteBonus;
             }
 
-            if (deathCause != MarioDeathCause.None)
+            fitness += powerupGains * PowerupGainWorth;
+            fitness += coinGains * CoinWorth;
+            fitness += yoshiCoinGains * YoshiCoinWorth;
+            fitness -= damageHits * DamagePenalty;
+
+            if (maxYoshiCoinsSeen >= YoshiCoinsPerLevel)
             {
-                var causeLabel = deathCause == MarioDeathCause.Enemy ? "enemigo" : "caida/peligro (pozo, lava, pinchos...)";
+                fitness += AllYoshiCoinsBonus;
+            }
+
+            if (reachedMidway)
+            {
+                fitness += MidwayPointBonus;
+            }
+
+            if (deathInfo.Cause != MarioDeathCause.None)
+            {
+                fitness -= DeathPenalty;
+                var causeLabel = deathInfo.Cause == MarioDeathCause.Enemy
+                    ? $"enemigo {MarioSpriteNames.Name(deathInfo.SpriteType)} (${deathInfo.SpriteType:X2}) cerca de X={deathInfo.EnemyX}, Y={deathInfo.EnemyY}"
+                    : "caida/peligro (pozo, lava, pinchos...)";
                 Console.WriteLine($"    Murio por: {causeLabel} (bestX={bestX})");
             }
 
             return fitness;
         }
 
-        private static MarioDeathCause ClassifyDeath(SnesState lastLivingState)
+        private readonly record struct DeathInfo(MarioDeathCause Cause, int SpriteType, int EnemyX, int EnemyY);
+
+        private static readonly DeathInfo NoDeath = new(MarioDeathCause.None, 0, 0, 0);
+
+        private static DeathInfo ClassifyDeath(SnesState lastLivingState)
         {
             var nearestDistanceSquared = float.MaxValue;
+            var nearestType = 0;
+            var nearestX = 0;
+            var nearestY = 0;
 
             foreach (var sprite in lastLivingState.Sprites)
             {
@@ -136,12 +177,15 @@ namespace Neuraval.Evolution.MarioBridge
                 if (distanceSquared < nearestDistanceSquared)
                 {
                     nearestDistanceSquared = distanceSquared;
+                    nearestType = sprite.Type;
+                    nearestX = sprite.X;
+                    nearestY = sprite.Y;
                 }
             }
 
             return nearestDistanceSquared <= EnemyContactRadius * EnemyContactRadius
-                ? MarioDeathCause.Enemy
-                : MarioDeathCause.FallOrHazard;
+                ? new DeathInfo(MarioDeathCause.Enemy, nearestType, nearestX, nearestY)
+                : new DeathInfo(MarioDeathCause.FallOrHazard, nearestType, nearestX, nearestY);
         }
     }
 }

@@ -1,8 +1,7 @@
-using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
+using System.Text.Json;
 using Neuraval.Evolution.Neat;
+using Neuraval.Evolution.Serialization;
 
 namespace Neuraval.Evolution.MarioBridge
 {
@@ -10,49 +9,34 @@ namespace Neuraval.Evolution.MarioBridge
     {
         public int Generation { get; set; }
         public float BestFitnessEver { get; set; }
-        public NeatGenome BestGenomeEver { get; set; }
+        public NeatGenome? BestGenomeEver { get; set; }
         public List<NeatGenome> Genomes { get; set; } = new List<NeatGenome>();
+    }
+
+    public sealed class MarioCheckpointHeader
+    {
+        public const string KindValue = "checkpoint";
+        public string Kind { get; set; } = KindValue;
+        public int FormatVersion { get; set; }
+        public int InputCount { get; set; }
+        public int OutputCount { get; set; }
+        public int Generation { get; set; }
+        public float BestFitnessEver { get; set; }
+        public DateTime SavedAtUtc { get; set; }
     }
 
     public static class MarioCheckpointStore
     {
-        // "NAVM" = Neural Avalon Model.
-        //
-        // v1: magic + version + generation + fitness + genomes. No metadata
-        //     sobre la forma de la red (InputCount/OutputCount) a nivel de
-        //     archivo -- solo dentro de cada genoma individual.
-        // v2: agrega un bloque de metadata justo despues de la version, con
-        //     InputCount/OutputCount/PopulationSize/fecha de guardado. Esto
-        //     permite detectar ANTES de tocar un solo genoma si el checkpoint
-        //     es compatible con la red que corre el codigo actual, en vez de
-        //     descubrirlo a los golpes con un IndexOutOfRangeException a
-        //     mitad de entrenamiento (que es lo que pasaba antes: un
-        //     checkpoint con OutputCount viejo se cargaba "bien", pero
-        //     Decide() reventaba al leer un boton que esos genomas nunca
-        //     tuvieron, y el proceso moria en silencio con el archivo
-        //     congelado en su ultimo tamano bueno).
-        private const string MagicHeader = "NAVM";
-        private const int FormatVersionLegacyV1 = 1;
-        private const int FormatVersionCurrent = 2;
+        public const int CurrentFormatVersion = 1;
 
         private static readonly string DefaultSaveFilePath = Path.Combine("checkpoints", "mario_checkpoint.navm");
+        private static readonly JsonSerializerOptions HeaderJsonOptions = new() { WriteIndented = false };
 
-        // Relative by default, so "the checkpoint" is just a file you can zip up with the
-        // project folder and drop on another machine. Program.cs can override this from
-        // --checkpoint <path> if you want it on a pendrive, Dropbox, etc.
         public static string SaveFilePath { get; set; } = DefaultSaveFilePath;
 
         private static string BackupFilePath => SaveFilePath + ".bak";
 
-        /// <summary>
-        /// Carga el checkpoint y valida que sea compatible con la forma de red
-        /// actual (MarioAgent.InputCount / MarioAgent.OutputCount). Si el
-        /// archivo principal esta corrupto o es incompatible, intenta el
-        /// backup automaticamente antes de rendirse. Nunca tira excepciones:
-        /// en el peor caso devuelve null y el llamador arranca de cero, pero
-        /// siempre deja un mensaje explicando por que.
-        /// </summary>
-        public static MarioCheckpoint Load()
+        public static MarioCheckpoint? Load()
         {
             var checkpoint = TryLoadFrom(SaveFilePath, "principal");
             if (checkpoint != null)
@@ -73,7 +57,7 @@ namespace Neuraval.Evolution.MarioBridge
             return checkpoint;
         }
 
-        private static MarioCheckpoint TryLoadFrom(string path, string label)
+        private static MarioCheckpoint? TryLoadFrom(string path, string label)
         {
             try
             {
@@ -82,91 +66,55 @@ namespace Neuraval.Evolution.MarioBridge
                     return null;
                 }
 
-                using var stream = File.OpenRead(path);
-                using var reader = new BinaryReader(stream);
-
-                var magic = new string(reader.ReadChars(MagicHeader.Length));
-                if (magic != MagicHeader)
+                var content = NavmBinarySerializer.Load(path);
+                if (content == null)
                 {
-                    Console.WriteLine($"El checkpoint {label} ({path}) no tiene el header NAVM esperado; se ignora.");
-                    ArchiveUnusable(path, "header-invalido");
+                    Console.WriteLine($"El checkpoint {label} ({path}) no es un archivo NAVM valido o esta corrupto; se ignora.");
+                    ArchiveUnusable(path, "no-valid");
                     return null;
                 }
 
-                var version = reader.ReadInt32();
-
-                int recordedInputCount;
-                int recordedOutputCount;
-                int recordedPopulationSize;
-                DateTime? savedAtUtc = null;
-
-                if (version == FormatVersionCurrent)
+                var header = DeserializeHeader(content.HeaderJson);
+                if (header == null || header.Kind != MarioCheckpointHeader.KindValue)
                 {
-                    recordedInputCount = reader.ReadInt32();
-                    recordedOutputCount = reader.ReadInt32();
-                    recordedPopulationSize = reader.ReadInt32();
-                    savedAtUtc = new DateTime(reader.ReadInt64(), DateTimeKind.Utc);
-                }
-                else if (version == FormatVersionLegacyV1)
-                {
-                    // v1 no tiene metadata a nivel de archivo. La forma de la
-                    // red se infiere del primer genoma una vez leido (mas
-                    // abajo), asumiendo compatible hasta entonces.
-                    recordedInputCount = -1;
-                    recordedOutputCount = -1;
-                    recordedPopulationSize = -1;
-                }
-                else
-                {
-                    Console.WriteLine($"El checkpoint {label} ({path}) tiene version de formato {version}, no soportada por este build; se ignora.");
-                    ArchiveUnusable(path, $"version-{version}-no-soportada");
+                    Console.WriteLine($"El checkpoint {label} ({path}) no tiene un encabezado de checkpoint valido; se ignora.");
+                    ArchiveUnusable(path, "header-invalido");
                     return null;
                 }
 
                 var checkpoint = new MarioCheckpoint
                 {
-                    Generation = reader.ReadInt32(),
-                    BestFitnessEver = reader.ReadSingle()
+                    Generation = header.Generation,
+                    BestFitnessEver = header.BestFitnessEver
                 };
 
-                var hasBestGenome = reader.ReadBoolean();
-                checkpoint.BestGenomeEver = hasBestGenome ? ReadGenome(reader) : null;
-
-                var genomeCount = reader.ReadInt32();
-                for (var i = 0; i < genomeCount; i++)
+                using (var stream = new MemoryStream(content.Body))
+                using (var reader = new BinaryReader(stream))
                 {
-                    checkpoint.Genomes.Add(ReadGenome(reader));
+                    var hasBestGenome = reader.ReadBoolean();
+                    checkpoint.BestGenomeEver = hasBestGenome ? MarioGenomeSerializer.Read(reader) : null;
+
+                    var genomeCount = reader.ReadInt32();
+                    for (var i = 0; i < genomeCount; i++)
+                    {
+                        checkpoint.Genomes.Add(MarioGenomeSerializer.Read(reader));
+                    }
                 }
 
-                // Para v1, no teniamos metadata de archivo: la sacamos del
-                // primer genoma disponible (bestGenome o el primero de la
-                // poblacion), que es lo mas parecido a "la forma con la que
-                // se guardo esto".
-                if (recordedInputCount < 0)
-                {
-                    var referenceGenome = checkpoint.BestGenomeEver ?? checkpoint.Genomes.FirstOrDefault();
-                    recordedInputCount = referenceGenome?.InputCount ?? MarioAgent.InputCount;
-                    recordedOutputCount = referenceGenome?.OutputCount ?? MarioAgent.OutputCount;
-                }
-
-                if (recordedInputCount != MarioAgent.InputCount || recordedOutputCount != MarioAgent.OutputCount)
+                if (header.InputCount != MarioAgent.InputCount || header.OutputCount != MarioAgent.OutputCount)
                 {
                     Console.WriteLine(
                         $"El checkpoint {label} ({path}) es incompatible con la red actual: " +
-                        $"fue guardado con {recordedInputCount} entradas / {recordedOutputCount} salidas, " +
+                        $"fue guardado con {header.InputCount} entradas / {header.OutputCount} salidas, " +
                         $"pero el codigo actual usa {MarioAgent.InputCount} entradas / {MarioAgent.OutputCount} salidas. " +
                         "Esto pasa cuando se cambia la topologia de la red (por ejemplo, se agrega un boton nuevo o " +
                         "una senal de entrada nueva) sin correr con --reset. Se archiva el checkpoint viejo (no se " +
                         "pierde) y se arranca una poblacion nueva compatible.");
-                    ArchiveUnusable(path, $"incompatible-{recordedInputCount}in-{recordedOutputCount}out");
+                    ArchiveUnusable(path, $"incompatible-{header.InputCount}in-{header.OutputCount}out");
                     return null;
                 }
 
-                if (savedAtUtc.HasValue)
-                {
-                    Console.WriteLine($"Checkpoint {label} valido: generacion {checkpoint.Generation}, guardado {savedAtUtc.Value:u} UTC.");
-                }
-
+                Console.WriteLine($"Checkpoint {label} valido: generacion {checkpoint.Generation}, guardado {header.SavedAtUtc:u} UTC.");
                 return checkpoint;
             }
             catch (Exception ex)
@@ -174,32 +122,6 @@ namespace Neuraval.Evolution.MarioBridge
                 Console.WriteLine($"El checkpoint {label} ({path}) esta corrupto o incompleto ({ex.GetType().Name}: {ex.Message}); se ignora.");
                 ArchiveUnusable(path, "corrupto");
                 return null;
-            }
-        }
-
-        /// <summary>
-        /// Renombra (no borra) un checkpoint que no se puede usar, para que
-        /// quede disponible por si alguien lo quiere inspeccionar despues,
-        /// pero deje de interferir con la carga normal.
-        /// </summary>
-        private static void ArchiveUnusable(string path, string reason)
-        {
-            try
-            {
-                if (!File.Exists(path))
-                {
-                    return;
-                }
-
-                var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
-                var archivedPath = $"{path}.{reason}.{timestamp}";
-                File.Move(path, archivedPath, overwrite: true);
-                Console.WriteLine($"Archivo movido a: {archivedPath}");
-            }
-            catch
-            {
-                // Si ni siquiera se puede archivar, seguimos: preferimos
-                // arrancar de cero antes que colgar el entrenamiento.
             }
         }
 
@@ -214,50 +136,40 @@ namespace Neuraval.Evolution.MarioBridge
                     Directory.CreateDirectory(directory);
                 }
 
-                var tempPath = SaveFilePath + ".tmp";
-
-                using (var stream = File.Create(tempPath))
-                using (var writer = new BinaryWriter(stream))
+                var header = new MarioCheckpointHeader
                 {
-                    writer.Write(MagicHeader.ToCharArray());
-                    writer.Write(FormatVersionCurrent);
+                    FormatVersion = CurrentFormatVersion,
+                    InputCount = MarioAgent.InputCount,
+                    OutputCount = MarioAgent.OutputCount,
+                    Generation = checkpoint.Generation,
+                    BestFitnessEver = checkpoint.BestFitnessEver,
+                    SavedAtUtc = DateTime.UtcNow
+                };
 
-                    // Metadata de v2: guardamos la forma exacta de red con la
-                    // que se genero este archivo, para poder validar antes de
-                    // leer un solo genoma la proxima vez que se cargue.
-                    writer.Write(MarioAgent.InputCount);
-                    writer.Write(MarioAgent.OutputCount);
-                    writer.Write(checkpoint.Genomes.Count);
-                    writer.Write(DateTime.UtcNow.Ticks);
-
-                    writer.Write(checkpoint.Generation);
-                    writer.Write(checkpoint.BestFitnessEver);
-
-                    writer.Write(checkpoint.BestGenomeEver != null);
-                    if (checkpoint.BestGenomeEver != null)
+                byte[] body;
+                using (var bodyStream = new MemoryStream())
+                {
+                    using (var writer = new BinaryWriter(bodyStream))
                     {
-                        WriteGenome(writer, checkpoint.BestGenomeEver);
+                        writer.Write(checkpoint.BestGenomeEver != null);
+                        if (checkpoint.BestGenomeEver != null)
+                        {
+                            MarioGenomeSerializer.Write(writer, checkpoint.BestGenomeEver);
+                        }
+
+                        writer.Write(checkpoint.Genomes.Count);
+                        foreach (var genome in checkpoint.Genomes)
+                        {
+                            MarioGenomeSerializer.Write(writer, genome);
+                        }
                     }
 
-                    writer.Write(checkpoint.Genomes.Count);
-                    foreach (var genome in checkpoint.Genomes)
-                    {
-                        WriteGenome(writer, genome);
-                    }
-
-                    writer.Flush();
-                    stream.Flush(flushToDisk: true);
+                    body = bodyStream.ToArray();
                 }
 
-                // Guardado atomico con backup automatico: File.Replace hace
-                // "escribir el reemplazo, y solo si eso funciona, mover el
-                // archivo viejo a BackupFilePath y poner el nuevo en su
-                // lugar" como una sola operacion. Si el proceso muere a
-                // mitad de un guardado (por ejemplo, se corta la luz o se
-                // cierra BizHawk de golpe), el peor caso es que el .tmp
-                // quede a medio escribir y se pise en el proximo intento --
-                // el archivo principal y el .bak nunca quedan en un estado
-                // a medio escribir.
+                var tempPath = SaveFilePath + ".tmp";
+                NavmBinarySerializer.Save(tempPath, JsonSerializer.Serialize(header, HeaderJsonOptions), body);
+
                 if (File.Exists(SaveFilePath))
                 {
                     File.Replace(tempPath, SaveFilePath, BackupFilePath, ignoreMetadataErrors: true);
@@ -295,56 +207,35 @@ namespace Neuraval.Evolution.MarioBridge
             }
         }
 
-        private static void WriteGenome(BinaryWriter writer, NeatGenome genome)
+        private static MarioCheckpointHeader? DeserializeHeader(string json)
         {
-            writer.Write(genome.InputCount);
-            writer.Write(genome.OutputCount);
-
-            writer.Write(genome.Nodes.Count);
-            foreach (var node in genome.Nodes)
+            try
             {
-                writer.Write(node.Id);
-                writer.Write((byte)node.Type);
+                return JsonSerializer.Deserialize<MarioCheckpointHeader>(json);
             }
-
-            writer.Write(genome.Connections.Count);
-            foreach (var connection in genome.Connections)
+            catch (JsonException)
             {
-                writer.Write(connection.InNode);
-                writer.Write(connection.OutNode);
-                writer.Write(connection.Weight);
-                writer.Write(connection.Enabled);
-                writer.Write(connection.Innovation);
+                return null;
             }
         }
 
-        private static NeatGenome ReadGenome(BinaryReader reader)
+        private static void ArchiveUnusable(string path, string reason)
         {
-            var inputCount = reader.ReadInt32();
-            var outputCount = reader.ReadInt32();
-
-            var nodeCount = reader.ReadInt32();
-            var nodes = new List<NeatNodeGene>(nodeCount);
-            for (var i = 0; i < nodeCount; i++)
+            try
             {
-                var id = reader.ReadInt32();
-                var type = (NeatNodeType)reader.ReadByte();
-                nodes.Add(new NeatNodeGene(id, type));
-            }
+                if (!File.Exists(path))
+                {
+                    return;
+                }
 
-            var connectionCount = reader.ReadInt32();
-            var connections = new List<NeatConnectionGene>(connectionCount);
-            for (var i = 0; i < connectionCount; i++)
+                var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+                var archivedPath = $"{path}.{reason}.{timestamp}";
+                File.Move(path, archivedPath, overwrite: true);
+                Console.WriteLine($"Archivo movido a: {archivedPath}");
+            }
+            catch
             {
-                var inNode = reader.ReadInt32();
-                var outNode = reader.ReadInt32();
-                var weight = reader.ReadSingle();
-                var enabled = reader.ReadBoolean();
-                var innovation = reader.ReadInt32();
-                connections.Add(new NeatConnectionGene(inNode, outNode, weight, enabled, innovation));
             }
-
-            return new NeatGenome(inputCount, outputCount, nodes, connections);
         }
     }
 }

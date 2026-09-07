@@ -9,13 +9,10 @@ namespace Neuraval.Samples.DinoGame.Sources
     ///
     /// Ya no depende de Accord.Neuro/Accord.Statistics: usa
     /// <see cref="FeedForwardNetwork"/>, el motor de red neuronal propio del
-    /// proyecto (sin librerias externas, en Neuraval.Core.Models), la
-    /// misma clase que usa Neuraval.Evolution.DinoDemo como su red de
-    /// politica para decidir Run/Jump.
+    /// proyecto (sin librerias externas, en Neuraval.Core.Models).
     ///
     /// Ademas implementa <see cref="IMutableAgent{TSelf}"/> para poder
-    /// reproducirse dentro de un algoritmo genetico (elitismo + mutacion),
-    /// igual que <c>DinoAgent</c> en Neuraval.Evolution.DinoDemo, y
+    /// reproducirse dentro de un algoritmo genetico (elitismo + mutacion) y
     /// expone su genoma (pesos) para poder guardarlo/cargarlo en disco y
     /// asi conservar el aprendizaje entre partidas.
     /// </summary>
@@ -24,9 +21,7 @@ namespace Neuraval.Samples.DinoGame.Sources
         // FeedForwardNetwork es simetrica (entrada y salida comparten
         // dimension), asi que se le pasan las 7 caracteristicas del juego
         // como entrada/salida y solo se leen las 2 primeras posiciones de la
-        // salida (salto, agacharse) descartando el resto - igual que hace
-        // DinoAgent en Neuraval.Evolution.DinoDemo con su vector de
-        // salida.
+        // salida (salto, agacharse) descartando el resto.
         public const int InputDim = 7;
         public const int HiddenDim = 8;
 
@@ -104,8 +99,7 @@ namespace Neuraval.Samples.DinoGame.Sources
         /// pesos/bias con probabilidad <paramref name="mutationRate"/> por
         /// parametro. Es la operacion de "reproduccion asexual" usada por el
         /// algoritmo genetico para generar la siguiente generacion a partir
-        /// de los dinosaurios con mejor fitness (igual patron que
-        /// <c>DinoAgent.CloneWithMutation</c> en Neuraval.Evolution.DinoDemo).
+        /// de los dinosaurios con mejor fitness.
         /// Con mutationRate = 0 y mutationStrength = 0 equivale a un clon
         /// exacto (se usa para preservar a los "elite" sin alterarlos).
         /// </summary>

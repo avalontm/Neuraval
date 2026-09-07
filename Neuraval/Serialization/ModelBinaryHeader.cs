@@ -3,7 +3,7 @@ using System;
 namespace Neuraval.Core.Serialization
 {
     /// <summary>
-    /// Metadatos livianos de un modelo <c>.ncbm</c>, almacenados como JSON al
+    /// Metadatos livianos de un modelo <c>.navm</c>, almacenados como JSON al
     /// inicio del archivo para que puedan inspeccionarse sin leer los pesos.
     /// No incluye ningún arreglo grande: eso vive únicamente en el Body binario.
     /// </summary>
