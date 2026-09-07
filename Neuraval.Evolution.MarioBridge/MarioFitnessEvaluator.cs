@@ -1,10 +1,39 @@
+using System;
 using Neuraval.Evolution;
 
 namespace Neuraval.Evolution.MarioBridge
 {
+    // Por que termino el episodio, mas alla de "murio si/no". No lo tenemos
+    // 100% verificado a nivel de direccion de RAM (ver ClassifyDeath para el
+    // porque), asi que por ahora es solo para consola/estadisticas, no
+    // afecta el fitness. Si mas adelante se quiere que la evolucion evite
+    // mas un tipo de muerte que otro (por ejemplo, penalizar caidas al vacio
+    // mas que golpes de enemigo), ese es un ajuste a proposito sobre este
+    // dato, no algo que convenga inventar aca sin que alguien lo pida.
+    public enum MarioDeathCause
+    {
+        None,
+        Enemy,
+        FallOrHazard
+    }
+
     public sealed class MarioFitnessEvaluator : IFitnessEvaluator<MarioAgent, SnesState, SnesAction>
     {
         private readonly int _maxSteps;
+
+        // Umbral de "habia algo pegado a Mario" para clasificar una muerte
+        // como "por enemigo". No es una hitbox real de SMW (esas varian por
+        // sprite y no las tenemos mapeadas con confianza) -- es una
+        // aproximacion practica: si el sprite mas cercano en el ultimo frame
+        // vivo estaba a 20px o menos (mas o menos 1 tile y un poco), es
+        // razonable asumir contacto. Puede haber falsos negativos (un
+        // enemigo que empujo a Mario y ya se alejo un frame antes de que
+        // muriera) y no distingue lava/pinchos/munchers de una caida real
+        // al vacio (ninguno de los dos tiene sprite propio) -- ambos quedan
+        // como FallOrHazard. Es una heuristica sobre datos que YA leiamos de
+        // forma confiable (posicion de Mario, lista de sprites), no una
+        // direccion de RAM nueva sin verificar.
+        private const float EnemyContactRadius = 20f;
 
         // Bonus grande y plano cuando el agente termina el episodio por
         // completar el nivel (no por morir ni por reset manual). bestX ya
@@ -37,9 +66,11 @@ namespace Neuraval.Evolution.MarioBridge
             var state = environment.Reset();
             var bestX = state.MarioX;
             var stepsSinceProgress = 0;
+            var deathCause = MarioDeathCause.None;
 
             for (var step = 0; step < _maxSteps; step++)
             {
+                var previousState = state;
                 var action = agent.Decide(state);
                 var result = environment.Step(action);
                 state = result.State;
@@ -52,6 +83,16 @@ namespace Neuraval.Evolution.MarioBridge
                 else
                 {
                     stepsSinceProgress++;
+                }
+
+                // Solo clasificamos en la transicion "vivo -> muerto" (la
+                // primera vez que lo vemos), usando el ultimo estado vivo:
+                // una vez muerto, la posicion de Mario y la lista de sprites
+                // ya no reflejan el momento del golpe, sino la animacion de
+                // muerte en curso.
+                if (state.IsDead && deathCause == MarioDeathCause.None)
+                {
+                    deathCause = ClassifyDeath(previousState);
                 }
 
                 // El episodio se corta si Mario muere, si completa el nivel
@@ -73,7 +114,34 @@ namespace Neuraval.Evolution.MarioBridge
                 fitness += LevelCompleteBonus;
             }
 
+            if (deathCause != MarioDeathCause.None)
+            {
+                var causeLabel = deathCause == MarioDeathCause.Enemy ? "enemigo" : "caida/peligro (pozo, lava, pinchos...)";
+                Console.WriteLine($"    Murio por: {causeLabel} (bestX={bestX})");
+            }
+
             return fitness;
+        }
+
+        private static MarioDeathCause ClassifyDeath(SnesState lastLivingState)
+        {
+            var nearestDistanceSquared = float.MaxValue;
+
+            foreach (var sprite in lastLivingState.Sprites)
+            {
+                var dx = sprite.X - lastLivingState.MarioX;
+                var dy = sprite.Y - lastLivingState.MarioY;
+                var distanceSquared = dx * dx + dy * dy;
+
+                if (distanceSquared < nearestDistanceSquared)
+                {
+                    nearestDistanceSquared = distanceSquared;
+                }
+            }
+
+            return nearestDistanceSquared <= EnemyContactRadius * EnemyContactRadius
+                ? MarioDeathCause.Enemy
+                : MarioDeathCause.FallOrHazard;
         }
     }
 }

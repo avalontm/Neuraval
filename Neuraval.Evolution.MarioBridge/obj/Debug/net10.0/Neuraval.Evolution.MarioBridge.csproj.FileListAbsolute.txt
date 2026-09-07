@@ -16,3 +16,4 @@ D:\_CODE_\Neuraval\Neuraval.Evolution.MarioBridge\obj\Debug\net10.0\refint\Neura
 D:\_CODE_\Neuraval\Neuraval.Evolution.MarioBridge\obj\Debug\net10.0\Neuraval.Evolution.MarioBridge.pdb
 D:\_CODE_\Neuraval\Neuraval.Evolution.MarioBridge\obj\Debug\net10.0\Neuraval.Evolution.MarioBridge.genruntimeconfig.cache
 D:\_CODE_\Neuraval\Neuraval.Evolution.MarioBridge\obj\Debug\net10.0\ref\Neuraval.Evolution.MarioBridge.dll
+D:\_CODE_\Neuraval\Neuraval.Evolution.MarioBridge\obj\Debug\net10.0\Neuraval.Evolution.MarioBridge.sourcelink.json

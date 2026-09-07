@@ -42,9 +42,13 @@ namespace Neuraval.Evolution.MarioBridge
             SendMessage(action.ToWireFormat());
         }
 
-        public void SendReset()
+        // levelIndex es opcional para no romper a nadie que siga llamando
+        // SendReset() sin argumentos: sin indice, Lua recarga el nivel que
+        // ya tenia cargado (ver applyAction en mario_bridge.lua). Con
+        // indice, le pide a Lua que cambie de savestate antes de recargar.
+        public void SendReset(int? levelIndex = null)
         {
-            SendMessage(ResetCommand);
+            SendMessage(levelIndex.HasValue ? $"{ResetCommand}:{levelIndex.Value}" : ResetCommand);
         }
 
         public void SendStop()

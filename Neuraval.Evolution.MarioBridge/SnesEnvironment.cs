@@ -6,6 +6,13 @@ namespace Neuraval.Evolution.MarioBridge
         private int _previousMarioX;
         private bool _connected;
 
+        // Que nivel/savestate pedir en el proximo Reset(). Program.cs lo
+        // actualiza antes de evaluar cada generacion (ver rotacion de
+        // niveles ahi); si nadie lo toca, queda en 0 y siempre se entrena
+        // sobre el primer savestate configurado en Lua, igual que antes de
+        // esta funcionalidad.
+        public int LevelIndex { get; set; }
+
         public SnesEnvironment(SnesBridgeConnection connection)
         {
             _connection = connection;
@@ -19,7 +26,7 @@ namespace Neuraval.Evolution.MarioBridge
                 _connected = true;
             }
 
-            _connection.SendReset();
+            _connection.SendReset(LevelIndex);
             var state = _connection.ReceiveState();
             _previousMarioX = state.MarioX;
             return state;
