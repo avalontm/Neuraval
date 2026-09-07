@@ -1,0 +1,19 @@
+{
+  "EmbeddingDim": 128,
+  "NumLayers": 2,
+  "NumHeads": 4,
+  "FeedforwardDim": 512,
+  "MaxSequenceLength": 32,
+  "Dropout": 0.1,
+  "BatchSize": 128,
+  "GradientAccumulationSteps": 1,
+  "LearningRate": 0.001,
+  "Epochs": 15,
+  "ValidationSplit": 0.2,
+  "Patience": 7,
+  "CheckpointEveryEpochs": 1,
+  "NumThreads": -1,
+  "UseGpu": true,
+  "ModelPath": "SavedModel",
+  "DataFolder": "Data"
+}

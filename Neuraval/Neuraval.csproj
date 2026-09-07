@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+	  <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- Fuerza optimizaciones del JIT aunque se compile en Debug -->
+    <Optimize>true</Optimize>
+    <TieredPGO>true</TieredPGO>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Neuraval.Cuda\Neuraval.Cuda.csproj" />
+    <ProjectReference Include="..\Neuraval.Abstractions\Neuraval.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>
