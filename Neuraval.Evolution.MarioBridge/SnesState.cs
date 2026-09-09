@@ -4,7 +4,7 @@ namespace Neuraval.Evolution.MarioBridge
 {
     public sealed class SnesState
     {
-        public const int GridRadius = 6;
+        public const int GridRadius = 8;
         public const int GridSize = GridRadius * 2 + 1;
 
         public int Frame { get; }

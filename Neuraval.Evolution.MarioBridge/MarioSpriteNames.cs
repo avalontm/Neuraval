@@ -8,6 +8,13 @@ namespace Neuraval.Evolution.MarioBridge
         // en la tabla de sprites de SMW (encaja entre $C3 Porcu-Puffer y $C5
         // Boo Grande jefe, tal como en el mapa de referencia). Verificar en
         // BizHawk con el visor de sprites si se detecta algo raro en juego.
+        // TODO-VERIFICAR: fuentes publicas de disassembly de SMW (SMW Central)
+        // listan $C4 como "plataforma gris que cae", no como Dragon Coin/Yoshi
+        // Coin. Ademas, en el SMW original la Dragon Coin normalmente NO es un
+        // sprite del generador estandar sino un objeto de Map16 (por eso en
+        // romhacking existe una version "sprite" custom hecha aparte). Antes
+        // de confiar en este ID para logica de fitness, confirmar en BizHawk
+        // que $C4 realmente corresponde a la moneda Yoshi en el build actual.
         public const int YoshiCoinSpriteId = 0xC4;
 
         private static readonly Dictionary<int, string> Known = new()
@@ -49,7 +56,9 @@ namespace Neuraval.Evolution.MarioBridge
             { 0x26, "Thwomp" },
             { 0x27, "Thwimp" },
             { 0x28, "Boo Grande" },
+            { 0x29, "Koopa Kid (trono de Koopaling)" },
             { 0x2A, "Planta Piranha invertida" },
+            { 0x2C, "Huevo de Yoshi" },
             { 0x2E, "Spike Top" },
             { 0x30, "Dry Bones" },
             { 0x31, "Bony Beetle" },
@@ -88,6 +97,12 @@ namespace Neuraval.Evolution.MarioBridge
             { 0x78, "1-Up" },
             { 0x86, "Wiggler" },
             { 0x91, "Chargin' Chuck" },
+            { 0x92, "Splittin' Chuck" },
+            { 0x93, "Bouncin' Chuck" },
+            { 0x94, "Whistlin' Chuck" },
+            { 0x95, "Clappin' Chuck" },
+            { 0x97, "Puntin' Chuck" },
+            { 0x98, "Pitchin' Chuck" },
             { 0x99, "Volcano Lotus" },
             { 0x9A, "Sumo Brother" },
             { 0x9B, "Hammer Brother" },
@@ -97,14 +112,18 @@ namespace Neuraval.Evolution.MarioBridge
             { 0xA2, "Mecha-Koopa" },
             { 0xA6, "Hothead" },
             { 0xA8, "Blargg" },
+            { 0xAA, "Fishbone" },
             { 0xAB, "Rex" },
             { 0xAC, "Pua de madera hacia abajo" },
             { 0xAD, "Pua de madera hacia arriba" },
+            { 0xAE, "Fishin' Boo" },
             { 0xB2, "Pua cayendo" },
             { 0xB4, "Amoladora" },
+            { 0xB9, "Caja de informacion (cartel de texto)" },
             { 0xBD, "Koopa deslizante" },
             { 0xBE, "Swooper" },
             { 0xBF, "Mega Mole" },
+            { 0xC2, "Blurp (Cheep Cheep de castillo/agua)" },
             { 0xC3, "Porcu-Puffer" },
             { YoshiCoinSpriteId, "Moneda Yoshi" },
             { 0xC5, "Boo Grande jefe" },
@@ -123,6 +142,34 @@ namespace Neuraval.Evolution.MarioBridge
         public static bool IsYoshiCoin(int type)
         {
             return type == YoshiCoinSpriteId;
+        }
+
+        private static readonly HashSet<int> Hazardous = new()
+        {
+            0x1C, // Bala Bill
+            0x9F, // Banzai Bill
+            0x44, // Torpedo Ted
+            0xA1, // Bola de Bowser
+            0x9E, // Bola y cadena
+            0xB4, // Amoladora
+            0x26, // Thwomp
+            0x27, // Thwimp
+            0x33, // Podoboo
+            0x34, // Bola de fuego de jefe
+            0x1D, // Llama saltarina
+            0x50  // Planta Piranha con fuego
+        };
+
+        public static bool IsHazardous(int type)
+        {
+            return Hazardous.Contains(type);
+        }
+
+        // Usado por MarioUnknownSpriteLogger para saber si vale la pena
+        // loguear un sprite (si ya tiene nombre, no hay nada que registrar).
+        public static bool IsKnown(int type)
+        {
+            return Known.ContainsKey(type);
         }
     }
 }

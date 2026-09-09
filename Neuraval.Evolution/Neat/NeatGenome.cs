@@ -113,7 +113,7 @@ namespace Neuraval.Evolution.Neat
                     }
                 }
 
-                values[nodeId] = MathF.Tanh(sum);
+                values[nodeId] = node.Type == NeatNodeType.Output ? Sigmoid(sum) : MathF.Tanh(sum);
             }
 
             var outputs = new float[OutputCount];
@@ -126,6 +126,11 @@ namespace Neuraval.Evolution.Neat
             }
 
             return outputs;
+        }
+
+        private static float Sigmoid(float value)
+        {
+            return 1f / (1f + MathF.Exp(-value));
         }
 
         private List<int> TopologicalOrder()

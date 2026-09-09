@@ -4,6 +4,14 @@ using Neuraval.Evolution.Serialization;
 
 namespace Neuraval.Evolution.MarioBridge
 {
+    public enum MarioTerminalReason
+    {
+        None = 0,
+        Death = 1,
+        LevelComplete = 2,
+        ManualReset = 3
+    }
+
     public sealed class MarioDatasetHeader
     {
         public const string KindValue = "imitation-dataset";
@@ -17,17 +25,20 @@ namespace Neuraval.Evolution.MarioBridge
 
     public sealed class MarioDatasetRecorder : IDisposable
     {
-        public const int CurrentFormatVersion = 1;
+        public const int CurrentFormatVersion = 2;
 
         private static readonly JsonSerializerOptions HeaderJsonOptions = new() { WriteIndented = false };
 
         private readonly string _finalPath;
         private readonly string _tempPath;
+        private readonly byte[]? _appendBody;
+        private readonly long _appendBaseCount;
         private FileStream? _stream;
         private BinaryWriter? _writer;
         private long _recordCount;
+        private readonly MarioEncoderStack _history = new();
 
-        public MarioDatasetRecorder(string filePath)
+        public MarioDatasetRecorder(string filePath, bool append = false)
         {
             _finalPath = filePath;
             _tempPath = filePath + ".tmp";
@@ -39,13 +50,33 @@ namespace Neuraval.Evolution.MarioBridge
                 Directory.CreateDirectory(directory);
             }
 
+            if (append && File.Exists(filePath))
+            {
+                var content = NavmBinarySerializer.Load(filePath);
+                if (content != null)
+                {
+                    try
+                    {
+                        var header = JsonSerializer.Deserialize<MarioDatasetHeader>(content.HeaderJson);
+                        if (header != null && header.Kind == MarioDatasetHeader.KindValue)
+                        {
+                            _appendBody = content.Body;
+                            _appendBaseCount = header.RecordCount;
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                    }
+                }
+            }
+
             _stream = new FileStream(_tempPath, FileMode.Create, FileAccess.Write);
             _writer = new BinaryWriter(_stream);
         }
 
-        public void Append(SnesState state, SnesButton action, float reward, bool done)
+        public void Append(SnesState state, SnesButton action, float reward, bool done, MarioTerminalReason terminalReason = MarioTerminalReason.None)
         {
-            var input = MarioStateEncoder.Encode(state);
+            var input = _history.Encode(state);
             _writer!.Write(state.Frame);
             _writer.Write(state.LevelIndex);
             foreach (var value in input)
@@ -56,7 +87,13 @@ namespace Neuraval.Evolution.MarioBridge
             _writer.Write((ushort)action);
             _writer.Write(reward);
             _writer.Write(done);
+            _writer.Write((byte)terminalReason);
             _recordCount++;
+
+            if (done)
+            {
+                _history.Reset();
+            }
         }
 
         public void Complete()
@@ -85,16 +122,24 @@ namespace Neuraval.Evolution.MarioBridge
             var header = new MarioDatasetHeader
             {
                 FormatVersion = CurrentFormatVersion,
-                InputCount = MarioAgent.InputCount,
+                InputCount = MarioStateEncoder.StackedInputCount,
                 OutputCount = MarioAgent.OutputCount,
-                RecordCount = _recordCount,
+                RecordCount = _appendBaseCount + _recordCount,
                 SavedAtUtc = DateTime.UtcNow
             };
+
+            if (_appendBody != null && _appendBody.Length > 0)
+            {
+                var combined = new byte[_appendBody.Length + body.Length];
+                Buffer.BlockCopy(_appendBody, 0, combined, 0, _appendBody.Length);
+                Buffer.BlockCopy(body, 0, combined, _appendBody.Length, body.Length);
+                body = combined;
+            }
 
             NavmBinarySerializer.Save(_finalPath, JsonSerializer.Serialize(header, HeaderJsonOptions), body);
             File.Delete(_tempPath);
 
-            Console.WriteLine($"Dataset guardado: {_recordCount} muestras en {Path.GetFullPath(_finalPath)}.");
+            Console.WriteLine($"Dataset guardado: {header.RecordCount} muestras en {Path.GetFullPath(_finalPath)}.");
         }
 
         public void Dispose()
@@ -118,7 +163,7 @@ namespace Neuraval.Evolution.MarioBridge
         }
     }
 
-    public sealed record MarioDatasetSample(int Frame, int LevelIndex, float[] Input, SnesButton ActionMask, float Reward, bool Done);
+    public sealed record MarioDatasetSample(int Frame, int LevelIndex, float[] Input, SnesButton ActionMask, float Reward, bool Done, int TerminalReason);
 
     public static class MarioDatasetLoader
     {
@@ -146,12 +191,20 @@ namespace Neuraval.Evolution.MarioBridge
                 return null;
             }
 
-            if (header.InputCount != MarioAgent.InputCount || header.OutputCount != MarioAgent.OutputCount)
+            if (header.FormatVersion != MarioDatasetRecorder.CurrentFormatVersion)
+            {
+                Console.WriteLine(
+                    $"El dataset {filePath} tiene formato v{header.FormatVersion} pero el codigo actual usa v{MarioDatasetRecorder.CurrentFormatVersion}. " +
+                    "Recondena el dataset con el codigo actual.");
+                return null;
+            }
+
+            if (header.InputCount != MarioStateEncoder.StackedInputCount || header.OutputCount != MarioAgent.OutputCount)
             {
                 Console.WriteLine(
                     $"El dataset {filePath} es incompatible con la red actual: " +
                     $"fue generado con {header.InputCount} entradas / {header.OutputCount} salidas, " +
-                    $"pero el codigo actual usa {MarioAgent.InputCount} entradas / {MarioAgent.OutputCount} salidas. " +
+                    $"pero el codigo actual usa {MarioStateEncoder.StackedInputCount} entradas / {MarioAgent.OutputCount} salidas. " +
                     "Recondena el dataset con el codigo actual.");
                 return null;
             }
@@ -174,8 +227,9 @@ namespace Neuraval.Evolution.MarioBridge
                 var actionMask = (SnesButton)reader.ReadUInt16();
                 var reward = reader.ReadSingle();
                 var done = reader.ReadByte() != 0;
+                var terminalReason = reader.ReadByte();
 
-                dataset.Samples.Add(new MarioDatasetSample(frame, levelIndex, input, actionMask, reward, done));
+                dataset.Samples.Add(new MarioDatasetSample(frame, levelIndex, input, actionMask, reward, done, terminalReason));
             }
 
             return dataset;

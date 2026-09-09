@@ -11,6 +11,14 @@ namespace Neuraval.Evolution.MarioBridge
         public float BestFitnessEver { get; set; }
         public NeatGenome? BestGenomeEver { get; set; }
         public List<NeatGenome> Genomes { get; set; } = new List<NeatGenome>();
+
+        // Nullable a proposito: checkpoints guardados antes de Fase 3 no
+        // tienen estos campos en su header JSON, y System.Text.Json los
+        // deserializa como null sin tirar excepcion. Un null significa
+        // "sin progreso de curriculum guardado todavia" y el llamador
+        // (Program.cs) lo interpreta como arrancar en el tramo 0.
+        public int? CurriculumStageIndex { get; set; }
+        public int? CurriculumGenerationsAtStage { get; set; }
     }
 
     public sealed class MarioCheckpointHeader
@@ -23,6 +31,8 @@ namespace Neuraval.Evolution.MarioBridge
         public int Generation { get; set; }
         public float BestFitnessEver { get; set; }
         public DateTime SavedAtUtc { get; set; }
+        public int? CurriculumStageIndex { get; set; }
+        public int? CurriculumGenerationsAtStage { get; set; }
     }
 
     public static class MarioCheckpointStore
@@ -85,7 +95,9 @@ namespace Neuraval.Evolution.MarioBridge
                 var checkpoint = new MarioCheckpoint
                 {
                     Generation = header.Generation,
-                    BestFitnessEver = header.BestFitnessEver
+                    BestFitnessEver = header.BestFitnessEver,
+                    CurriculumStageIndex = header.CurriculumStageIndex,
+                    CurriculumGenerationsAtStage = header.CurriculumGenerationsAtStage
                 };
 
                 using (var stream = new MemoryStream(content.Body))
@@ -143,7 +155,9 @@ namespace Neuraval.Evolution.MarioBridge
                     OutputCount = MarioAgent.OutputCount,
                     Generation = checkpoint.Generation,
                     BestFitnessEver = checkpoint.BestFitnessEver,
-                    SavedAtUtc = DateTime.UtcNow
+                    SavedAtUtc = DateTime.UtcNow,
+                    CurriculumStageIndex = checkpoint.CurriculumStageIndex,
+                    CurriculumGenerationsAtStage = checkpoint.CurriculumGenerationsAtStage
                 };
 
                 byte[] body;
@@ -168,16 +182,24 @@ namespace Neuraval.Evolution.MarioBridge
                 }
 
                 var tempPath = SaveFilePath + ".tmp";
-                NavmBinarySerializer.Save(tempPath, JsonSerializer.Serialize(header, HeaderJsonOptions), body);
+                var headerJson = JsonSerializer.Serialize(header, HeaderJsonOptions);
 
-                if (File.Exists(SaveFilePath))
-                {
-                    File.Replace(tempPath, SaveFilePath, BackupFilePath, ignoreMetadataErrors: true);
-                }
-                else
-                {
-                    File.Move(tempPath, SaveFilePath, overwrite: true);
-                }
+                TransientFileIoRetry.Run(
+                    () =>
+                    {
+                        NavmBinarySerializer.Save(tempPath, headerJson, body);
+
+                        if (File.Exists(SaveFilePath))
+                        {
+                            File.Replace(tempPath, SaveFilePath, BackupFilePath, ignoreMetadataErrors: true);
+                        }
+                        else
+                        {
+                            File.Move(tempPath, SaveFilePath, overwrite: true);
+                        }
+                    },
+                    onRetry: (attempt, maxRetries, ex) => Console.WriteLine(
+                        $"Checkpoint: el archivo esta en uso por otro proceso ({ex.Message}); reintentando ({attempt}/{maxRetries})..."));
 
                 var savedSizeKb = new FileInfo(SaveFilePath).Length / 1024.0;
                 Console.WriteLine($"Checkpoint guardado: generacion {checkpoint.Generation}, {checkpoint.Genomes.Count} genomas, {savedSizeKb:F1} KB.");

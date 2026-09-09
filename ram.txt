@@ -1,0 +1,1972 @@
+7E0000 16 665 Misc.
+Scratch RAM, is and can be used for multiple purposes. (Temporarily preserving a value)
+In SMW (and LM ASM hacks), it includes, but is not excluded to:
+$7E0000 - Xpos Used For Sprite Creation, Low Byte
+$7E0001 - Ypos Used For Sprite Creation, Low Byte
+$7E0003 - Block # from LM Map16 Editor
+$7E0004 - Sprite GFX table - Used for when uploading sprite GFX files to VRAM, also used as high byte for block number
+$7E0008 - Xpos Used For Sprite Creation, High Byte
+$7E0009 - Ypos Used For Sprite Creation, High Byte
+$7E000E - Used by the game to store the level number briefly while deciding which Level and Sprite Pointers to use (during Overworld->Level transitions).
+7E0010 1 106 Flag
+If value is != #$00, run the actual game (otherwise, loop forever). Is set to a non-zero value during NMI.
+7E0011 1 174 Flag
+Used to distinguish IRQ #1 from IRQ #2's code. (Inside the Morton/Ludwig/Roy room, although it can be used in other areas that run IRQ as well.) #$00 = IRQ #1, #$01 = IRQ #2.
+7E0012 1 3420 Graphics
+Stripe image loader (Value must be divisible by 3).
+Valid values:
+00 - default, uploads from $7F837D
+03 - Title screen
+06 - Overworld border
+09 - Remove text box
+0C - Continue? menu
+0F - Cinema BG: Cookie Mountain
+12 - 1 or 2 Players? menu
+15 - Overworld scroll arrows
+18 - Remove overworld scroll arrows
+1B - Remove various menus
+1E - Save? menu
+21 - Cinema 1, Line 8: (Blank)
+24 - Cinema 1, Line 7: travel to Donut Land.
+27 - Cinema 1, Line 6: Together, they now
+2A - Cinema 1, Line 5: still trapped in an egg.
+2D - Cinema 1, Line 4: Yoshi's friend who is
+30 - Cinema 1, Line 3: castle #1 and rescued
+33 - Cinema 1, Line 2: demented Iggy Koopa in
+36 - Cinema 1, Line 1: Mario has defeated the
+39 - Cinema 2, Line 8: Princess Toadstool?
+3C - Cinema 2, Line 7: What will become of
+3F - Cinema 2, Line 6: Mario in this new world?
+42 - Cinema 2, Line 5: Dome. What traps await
+45 - Cinema 2, Line 4: the underground Vanilla
+48 - Cinema 2, Line 3: memory. The next area is
+4B - Cinema 2, Line 2: castle #2 is now just a
+4E - Cinema 2, Line 1: Morton Koopa Jr. of
+51 - Cinema 3, Line 8: (Blank)
+54 - Cinema 3, Line 7: Green Switches yet?
+57 - Cinema 3, Line 6: you found the Red and
+5A - Cinema 3, Line 5: more difficult. Have
+5D - Cinema 3, Line 4: starting to get much
+60 - Cinema 3, Line 3: #3. Mario's quest is
+63 - Cinema 3, Line 2: Lemmy Koopa of castle
+66 - Cinema 3, Line 1: Mario has triumphed over
+69 - Cinema 4, Line 8: this perplexing forest.
+6C - Cinema 4, Line 7: to solve the puzzle of
+6F - Cinema 4, Line 6: Mario must use his brain
+72 - Cinema 4, Line 5: Illusion lies ahead.
+75 - Cinema 4, Line 4: are over. The Forest of
+78 - Cinema 4, Line 3: symphonies in castle #4
+7B - Cinema 4, Line 2: of composing Koopa
+7E - Cinema 4, Line 1: Ludwig von Koopa's days
+81 - Cinema 5, Line 8: (Blank)
+84 - Cinema 5, Line 7: tasty) Chocolate Island!
+87 - Cinema 5, Line 6: the dangerous (but
+8A - Cinema 5, Line 5: castle #5. Onward to
+8D - Cinema 5, Line 4: end to Roy Koopa of
+90 - Cinema 5, Line 3: Illusion and has put an
+93 - Cinema 5, Line 2: through the Forest of
+96 - Cinema 5, Line 1: Mario found his way
+99 - Cinema 6, Line 8: to the Valley of Bowser.
+9C - Cinema 6, Line 7: appears to be a gateway
+9F - Cinema 6, Line 6: is a sunken ship that
+A2 - Cinema 6, Line 5: now before him. There
+A5 - Cinema 6, Line 4: the challenge that is
+A8 - Cinema 6, Line 3: song. Mario must meet
+AB - Cinema 6, Line 2: #6 has sung her last
+AE - Cinema 6, Line 1: Wendy O. Koopa in castle
+B1 - Cinema 7, Line 8: Dinosaur Land?
+B4 - Cinema 7, Line 7: restore peace to
+B7 - Cinema 7, Line 6: Can Mario rescue her and
+BA - Cinema 7, Line 5: Toadstool is being held.
+BD - Cinema 7, Line 4: Castle where Princess
+C0 - Cinema 7, Line 3: that is left is Bowser's
+C3 - Cinema 7, Line 2: Koopa in castle #7. All
+C6 - Cinema 7, Line 1: Mario has defeated Larry
+C9 - Cinema BG: Underground
+CC - Cinema BG: Chocolate Island
+CF - Cinema FG: Castle
+D2 - Completely black
+D5 - THE END
+D8 - Lakitu et al. enemy names
+DB - Hammer Brother et al. enemy names
+DE - Sumo Brother et al. enemy names
+E1 - Banzai Bill et al. enemy names
+E4 - Dino-Rhino et al. enemy names
+E7 - 3Blargg et al. enemy names
+EA - Rip van Fish et al. enemy names
+ED - Big Boo et al. enemy names
+F0 - Dry Bones et al. enemy names
+F3 - Fishbone et al. enemy names
+F6 - Reznor enemy name
+F9 - Mechakoopas enemy name
+FC - Bowser/Koopa kids enemy names
+FF - Cinema BG: Overworld
+7E0013 1 41 Counter
+Frame Counter (Increases by 1 each frame)
+7E0014 1 127 Counter
+"Sprite" frame counter. Stops when sprites are frozen, etc. Basically, a frame counter that only runs when a sprite is running.
+7E0015 1 98 I/O
+Controller data 1. 01=Right, 02=Left, 04=Down, 08=Up, 10=Start, 20=Select, 40=Y and X, 80=B and A.
+7E0016 1 110 I/O
+Controller data 1 (one frame). 01=Right, 02=Left, 04=Down, 08=Up, 10=Start, 20=Select, 40=Y and X, 80=B and A.
+7E0017 1 42 I/O
+Controller data 2. 10=R, 20=L, 40=X, 80=A.
+7E0018 1 54 I/O
+Controller data 2 (one frame). 10=R, 20=L, 40=X, 80=A.
+7E0019 1 60 Player
+Powerup. #$00 = Small, #$01 = Big, #$02 = Cape, #$03 = Fire.
+7E001A 2 36 Hardware mirror
+Layer 1 X position. Mirror of $210D.
+7E001C 2 36 Hardware mirror
+Layer 1 Y position. Mirror of $210E.
+7E001E 2 36 Hardware mirror
+Layer 2 X position. Mirror of $210F.
+7E0020 2 36 Hardware mirror
+Layer 2 Y position. Mirror of $2110.
+7E0022 2 35 Hardware mirror
+Layer 3 X postion. Mirror of $2111.
+7E0024 2 36 Hardware mirror
+Layer 3 Y position. Mirror of $2112.
+7E0026 2 161 Misc.
+Depending on Layer 3 tides being activated or not, it's either:
+
+Not activated:
+(Layer 2 Xpos) minus (Layer 1 Xpos)
+Activated:
+Layer 3 Xpos) minus (Layer 1 Xpos)
+7E0028 2 160 Misc.
+Depending on layer 3 tides being activated or not, it's either:
+Not activated:
+(Layer 2 Ypos) minus (Layer 1 Ypos)
+Activated:
+Layer 3 Ypos) minus (Layer 1 Ypos)
+7E002A 2 52 Hardware mirror
+Mode 7 Center X Position. Mirror of $211F, + #$0080.
+7E002C 2 52 Hardware mirror
+Mode 7 Center Y position. Mirror of $2120, + #$0080.
+7E002E 2 46 Hardware mirror
+Mode 7 Parameter A (Scale X). Mirror of $211B.
+7E0030 2 46 Hardware mirror
+Mode 7 Parameter B (Shear X). Mirror of $211C.
+7E0032 2 46 Hardware mirror
+Mode 7 Parameter C (Shear Y). Mirror of $211D.
+7E0034 2 46 Hardware mirror
+Mode 7 Parameter D (Scale Y). Mirror of $211E.
+7E0036 2 73 Misc.
+Mode 7 Rotation. It will rotate layer 1/BG1 clockwise as you increase it.
+7E0038 2 81 Misc.
+Mode 7 scaling. Byte 1 scales it horizontally, while byte 2 scales it vertically.
+7E003A 2 43 Hardware mirror
+Mode 7 Layer 1 X Position. Mirror of $210D.
+7E003C 2 43 Hardware mirror
+Mode 7 Layer 1 Y Position. Mirror of $210E.
+7E003E 1 107 Hardware mirror
+BG Mode select ($2105) applied with IRQ below status bar. Setting bit 3 (%00001000) gives Layer 3 priority.
+7E003F 1 96 Hardware mirror
+OAM Address, low byte. Also known as the mirror of register $2102. High byte is at ROM $00:846B.
+7E0040 1 202 Hardware mirror
+CGADSUB setting: abcdefgh a = 0 for Addition, 1 for Subtraction, b = 1/2 Enable c = Back Enable, d = Object Enable, efgh = Enable BG 4, 3, 2, 1 (bit 3 only affect below the status bar). Mirror of $2131.
+7E0041 1 109 Hardware mirror
+BG 1 and 2 Window Mask Settings: aaaabbbb a = BG 2 Window Settings b = BG 1 Window Settings. Mirror of $2123.
+7E0042 1 108 Hardware mirror
+BG 3 and 4 Window Mask Settings: aaabbbb a = BG 4 Window Settings b = BG 3 Window Settings. Mirror of $2124.
+7E0043 1 107 Hardware mirror
+OBJ and Color Window Settings: aaaabbbb a = Color Window Settings b = OBJ Window Settings. Mirror of $2125.
+7E0044 1 177 Hardware mirror
+Initial Settings for Color Addition: aabb00cd a = Main Color Window On/Off, b = Sub Color Window On/Off, c = Fixed Color Add/Subtract Enable, d = Direct Select. Mirror of $2130.
+7E0045 2 87 Camera
+Column (or row) of map16 tiles to use for VRAM upload when L1 is scrolling left (or up)
+7E0047 2 70 Camera
+Identical to $7E0045, but used for right (or down) direction scrolling
+7E0049 2 70 Camera
+Identical to $7E0045-$7E0046, but for layer 2 levels where applicable.
+7E004B 2 70 Camera
+Identical to $7E0047-$7E0048, but for layer 2 levels where applicable.
+7E004D 2 265 Camera
+Last X (or Y) L1 scroll value where VRAM upload of map16 tiles was performed when scrolling left (or up). The low 4 bits are forced to zero in order to get scroll values on a 16 pixel boundary. It is used to determine if a VRAM update is necessary during scrolling.
+7E004F 2 78 Camera
+Identical to $7E004D-$7E004E, but for scroll in the right (or down) direction.
+7E0051 2 58 Camera
+Identical to $7E004D-$7E004E, but for L2 where applicable.
+7E0053 2 58 Camera
+Identical to $7E004F-$7E0050, but for L2 where applicable.
+7E0055 1 112 Camera
+Direction of scroll for L1.
+
+00: left (or up)
+02: right (or down)
+
+Used to index the above 2 byte camera tables.
+7E0056 1 50 Camera
+Identical to $7E0055, but for L2 where applicable.
+7E0057 1 141 Blocks
+Used in the level loading code. It's the position within the subscreen. Could be used as scratch RAM (except in ObjecTool and similar codes).
+7E0058 1 51 Empty
+Cleared during reset, titlescreen load and OW load.
+7E0059 1 199 Blocks
+Used in the level loading routine. It's the size of the object, or extended object type depending on what object is being loaded. Could be used as scratch RAM (except in ObjecTool and similar codes).
+7E005A 1 128 Blocks
+Used in the level loading routine. It's the object number. Could be used as scratch RAM (except in ObjecTool and similar codes).
+7E005B 1 111 Misc.
+Screen mode: Cc????Vv
+C=Collision with layer 2
+c=Collision with layer 1?
+V=Vertical layer 2 
+v=Vertical layer 1
+7E005C 1 60 Empty
+Empty. Cleared during reset, titlescreen and overworld load.
+7E005D 1 21 Misc.
+# of screens in level
+7E005E 1 109 Camera
+The last screen # (minus 1) before the camera stops moving horizontally. (Only applies in horizontal levels.)
+7E005F 1 105 Camera
+The last screen # (minus 1) before the camera stops moving vertically. (Only applies in vertical levels.)
+7E0060 4 60 Empty
+Empty. Cleared during reset, titlescreen and overworld load.
+7E0064 1 44 Misc.
+Properties (YXPPCCCT) byte for most sprites.
+7E0065 3 28 Pointer
+24bit pointer to Level Data.
+7E0068 3 34 Pointer
+24bit pointer to the layer 2 data.
+7E006B 3 59 Pointer
+Pointer to low byte of block data (used during level load).
+7E006E 3 60 Pointer
+Pointer to high byte of block data (used during level load).
+7E0071 1 607 Player
+Mario Action trigger
+
+00=nothing
+01=flashing as if Mario's hurt by an enemy
+02=get mushroom animation
+03=get cape animation (note: you must write to $1496 for it to work)
+04=get flower animation (note: you must write to $149B for it to work)
+05=enter a horizontal pipe
+06=enter a vertical pipe
+07=shoot from a diagonal pipe
+08=shoot into the sky (like when yoshi gets wings from a ?-block)
+09=end the level without activating events on the OW (used when Mario dies) (note: you will lose a life)
+0A=used in castle entrance moves
+0B=Mario stops until $00 is written
+0C=castle destruction moves
+0D=enter a door
+7E0072 1 402 Player
+Mario is in the air flag.
+
+This flag is set when Mario is currently in the air. That means when he's falling, jumping etc. It is not set, when he is climbing and probably in some other special cases. It's used to determine if the player can jump by pressing B or A.
+
+Note that this is not a simple 1/0 flag. It's always 0 when Mario isn't jumping, but it has various other values when he is in the air.
+7E0073 1 140 Flag
+Mario is ducking flag. #$04 is yes, #$00 is no. Other values are yes in most cases, but some patches might glitch, so it's best to use #$04.
+7E0074 1 22 Flag
+Mario is climbing flag
+7E0075 1 24 Flag
+"Mario is in water" flag
+7E0076 1 37 Player
+Mario's direction. 
+00=Left; 01=Right
+7E0077 1 269 Player
+Player blocked status - Used to check if player is blocked in a certain direction. Format: SxxMUDLR
+The M bit means that Mario is in the middle of a block.
+The S bit indicates that Mario is touching the side of the screens while horizontal screen scrolling is disabled.
+7E0078 1 62 Player
+Used to obscure (parts of) Mario. Set to FF to fully hide him.
+7E0079 1 40 Empty
+Empty. Cleared during level and OW load.
+7E007A 1 52 Player
+Accumulating fraction bits for the player's X speed.
+7E007B 1 179 Player
+Mario Xspeed. #$7F is the fastest rightwards speed, while #$80 is the highest leftwards. +/-#$15 is fully walking, +/-#$30 is fully running. #$00-#$7F is right, #$80-#$FF is left.
+7E007C 1 67 Empty
+Empty. Cleared during reset, titlescreen, overworld and level load.
+7E007D 1 198 Player
+Mario Yspeed. #$00-#$7F = falling, #$80-#$FF = rising. #$80 is the highest upwards speed, while #$7F is the highest downwards speed. #$46 is the maximum fall speed and #$B0 is the normal jump speed.
+7E007E 2 27 Player
+Mario's X position (screen)
+7E0080 2 27 Player
+Mario's Y position (screen)
+7E0085 1 16 Flag
+Water Level flag
+7E0086 1 133 Flag
+Slippery Level flag. #$FF makes the player slip a LOT while #$01 makes the player slip barely. #$00 disables the slippery level flag.
+7E0087 1 67 Empty
+Empty. Cleared during reset, titlescreen, overworld and level load.
+7E0088 1 64 Player
+How long Mario goes into a pipe until he warps to another level.
+7E0089 1 441 Player
+Actions to take when Mario enters/exits a pipe. (Writing to it will only have effect if 7E:0071 is equal to 06.)
+
+00=Enter a right-facing horizontal pipe.
+01=Enter a left-facing horizontal pipe.
+02=Enter a down-facing vertical pipe.
+03=Enter an up-facing vertical pipe.
+04=Exit from a left-facing horizontal pipe.
+05=Exit from a right-facing horizontal pipe.
+06=Exit from an up-facing vertical pipe.
+07=Exit from a down-facing vertical pipe.
+7E008A 3 258 Pointer
+Holds the 3-byte pointer to the location of the decompressed GFX files inside the ROM. Solely $8A is used as number of options to select in a blinking cursor menu. 
+Solely $8A also controls the speed of revealing event tiles (Only 01 and 08 are valid though)
+7E008D 3 134 Misc.
+24-bit pointer to part of the decompressed graphics; starts at $7EACFE/F and decrementing. RAM address has multiple purposes, however.
+7E0092 1 84 Player
+$94 & #$0F + #$08. That means it's the player's position within a single Map16 tile.
+7E0093 1 122 Player
+$92 >> 3. That means this is set to 0 if the player's position is on the left side of a block, and 1 if on the right side.
+7E0094 2 38 Player
+Mario's X position (level, next frame)
+7E0096 2 38 Player
+Mario's Y position (level, next frame)
+7E0098 1 74 Sprites
+Sprite creation: Y position (low)
+Custom Block: Y position of contact(low)
+7E0099 1 76 Sprites
+Sprite creation: Y position (high)
+Custom Block: Y position of contact(high)
+7E009A 1 74 Sprites
+Sprite creation: X position (low)
+Custom Block: X position of contact(low)
+7E009B 1 76 Sprites
+Sprite creation: X position (high)
+Custom Block: X position of contact(high)
+7E009C 1 1082 Blocks
+Generated Map16 tile (used with $00BEB0).
+Valid values:
+00 - do nothing
+01 - empty (025), sets item memory setting bit
+02 - empty (025)
+03 - vine (006)
+04 - solid bush tile, used by berries (049)
+05 - always turning turn block (048)
+06 - coin (02B)
+07 - tree background, used by the mushroom scales (sprite 8F) (0A2)
+08 - mole hole (0C6)
+09 - invisible solid block (152)
+0A - multiple coin turnblock (11B)
+0B - multiple coin q block (123)
+0C - turn block (11E)
+0D - used block (132)
+0E - note block (113)
+0F - note block (115)
+10 - 4-way note block (116)
+11 - turn block you can bounce off from the side (12B)
+12 - translucent block (12C)
+13 - on/off switch (112)
+14 - side of pipe, left (168)
+15 - side of pipe, right (169)
+16 - used block (132), sets item memory setting bit
+17 - O block from 1up game (15E), sets item memory setting bit
+18 - sets low byte of current and below tile to 25 (making both invisible, even if it's wrong), sets item memory setting bit. Used by Yoshi coin.
+19 - unknown
+1A - unknown
+1B - unknown (invisible?)
+anything else - crash or undefined behaviour
+7E009D 1 18 Sprites
+Lock sprites timer
+7E009E 12 13 Sprites
+Sprite number
+7E00AA 12 20 Sprites
+Sprite Y Speed Table
+7E00B6 12 20 Sprites
+Sprite X Speed Table
+7E00C2 12 139 Sprites
+Sprite table that is not restricted to one predefined purpose. In SMW, it's most commonly used as a pointer to different parts of a sprite.
+7E00CE 3 37 Pointer
+24bit pointer to level's sprite data.
+7E00D1 2 41 Player
+Mario's X position (level, current frame)
+7E00D3 2 41 Player
+Mario's Y position (level, current frame)
+7E00D5 3 49 Pointer
+Pointer to X and Y positions of Wiggler segments.
+7E00D8 12 28 Sprites
+Sprite Ypos Low Byte (table)
+7E00E4 12 28 Sprites
+Sprite Xpos Low Byte (table)
+7E00F0 16 324 Empty
+Empty space. Cleared on reset and title screen load. Note: Is used by Lunar Magic.
+$FE is the current level number plus 1 (so Yoshi's Island 1 would store #$0106 here). It's used for the custom palette loading code. 0000 means that the custom palette won't be loaded (this is probably used for castle intros and/or credits).
+7E0100 1 1031 Misc.
+Game Mode.
+00 Load Nintendo Presents
+01 Nintendo Presents
+02 Fade to Title Screen
+03 Load Title Screen
+04 Prepare Title Screen
+05 Title Screen: Fade in
+06 Title Screen: Circle effect
+07 Title Screen
+08 Title Screen: File select
+09 Title Screen: File delete
+0A Title Screen: Player select
+0B Fade to Overworld
+0C Load Overworld
+0D Overworld: Fade in
+0E Overworld
+0F Fade to Level
+10 Fade to Level (black)
+11 Load Level (Mario Start!)
+12 Prepare Level
+13 Level: Fade in
+14 Level
+15 Fade to Game Over / Time Up
+16 Load Game Over / Time Up
+17 Game Over / Time Up
+18 Load Credits/Cutscene?
+19 Load Credits/Cutscene?
+1A Load Credits/Cutscene?
+1B Ending: Credits / Cutscene
+1C Ending: Fade to Yoshi's House
+1D Ending: Load Yoshi's House
+1E Ending: Yoshi's House: Fade in 
+1F Ending: Yoshi's House
+20 Fade to Enemies
+21 Fade to Enemies (black)
+22 Fade to Enemies?
+23 Fade to Enemies (black)?
+24 Ending: Enemies: Fade in
+25 Ending: Enemies
+26 Fade to The End / Go to 22
+27 Ending: Load The End
+28 Ending: The End: Fade in
+29 Ending: The End
+7E0101 4 59 Misc.
+Currently loaded sprite GFX files (stored in reverse order)
+7E0105 4 58 Misc.
+Currently loaded layer GFX files (stored in reverse order)
+7E0109 1 173 Misc.
+When set to a non-zero value, the OW loading routine is overridden by loading level value stored here-$24. This means levels 0-FF can be used with the exception of level DC.
+7E010A 1 25 Misc.
+Current save file number.
+7E010B 245 69 Misc.
+Stack. The first two bytes is the current level number in most hacks.
+7E0200 544 79 I/O
+OAM. $0310-$0313 is for Mario's upper tile, $0314-$0317 for Mario's lower tile.
+7E0420 128 367 Sprites
+Table that determines the size of a sprite's tile - 8x8 (#$00) or 16x16 (#$02). Each byte corresponds to 4 OAM bytes. Stores to $0400-$041F (where each 2 bits correspond to 4 OAM bytes.)
+The lowest bit (#$01) is also used for the high bit of the X position.
+
+$0466: During the P-Baloon flight, equals 2 if mario should show his inflated frame. Otherwise, equals zero.
+7E04A0 448 59 Misc.
+HDMA table for windowing effects (keyhole, level end, etc.)
+7E0660 32 143 Empty
+Empty. Cleared during reset and titlescreen load.
+Used by the newer LM versions (purpose yet unknown). Usage in ASM hacks not very recommended.
+7E0680 21 75 Palettes
+Used for the lightning effect, Big Boo Boss fading, and Magikoopa's fading.
+7E0695 108 98 Empty
+Empty. Cleared during reset and titlescreen load.
+100 bytes used in LM 1.70+ for VRAM modification
+7E0701 2 58 Palettes
+BG Colour. Used during gameplay in conjunction with $2132.
+7E0703 512 70 Palettes
+The whole palette. Seems to only be used in the level loading routine.
+7E0903 2 26 Palettes
+Copy of BG colour $0701/2.
+7E0905 496 84 Palettes
+Copy of palettes 0-F from $0703-$08F2. Only the first half of palette F is included.
+7E0AF5 1 85 Empty
+Cleared during reset and titlescreen load. Also cleared after a boss had been beaten.
+7E0AF6 256 316 Misc.
+Used for three different things:
+1. Decompressed overworld graphics, animated tiles. For that it also cooperates with $0BF6-$0C55.
+2. Iggy's platform interaction. (16x16.)
+3. Various tables for the Yoshi eggs at the credits. That includes how much time to wait until a new egg breaks ($0B08), Y speed ($0B0C,x), etc.
+7E0BF6 384 47 Misc.
+Decompressed GFX for tiles 4A-4F, 5A-5F of SP1.
+7E0D76 2 93 Graphics
+Used during the Mario GFX DMA routine. It holds the first of three possible source addresses.
+7E0D78 2 94 Graphics
+Used during the Mario GFX DMA routine. It holds the second of three possible source addresses.
+7E0D7A 2 93 Graphics
+Used during the Mario GFX DMA routine. It holds the third of three possible source addresses.
+7E0D7C 2 91 Graphics
+Used during the Mario GFX DMA routine. It holds the first of three possible VRAM addresses.
+7E0D7E 2 92 Graphics
+Used during the Mario GFX DMA routine. It holds the second of three possible VRAM addresses.
+7E0D80 2 91 Graphics
+Used during the Mario GFX DMA routine. It holds the third of three possible VRAM addresses.
+7E0D82 2 87 Pointer
+Pointer to Mario/Luigi palette. B2C8=Mario B2DC=Luigi, B2F0=Fire Mario, B304=Fire Luigi
+7E0D84 1 192 Misc.
+Used in Mario's DMA routine. Basically holds the amount of tiles to load. Is 0A in levels and 06 on the overworld.
+If it's set to 0, Mario's palette isn't reloaded. The title screen uses this.
+7E0D85 20 184 Sprites
+2 byte pointers in bank 7E for uploading Player's onscreen tiles. 2 sets of 10 bytes (top half, bottom half) for Mario's head, body, cape, Yoshi head / Fireball, Yoshi body / Fireball.
+7E0D99 2 129 Graphics
+Holds the lower two bytes of the RAM address where the player's graphics are stored; used during the player graphics DMA routine.
+7E0D9B 1 265 Misc.
+Activates different level modes, depending on the following values:
+$00 = Regular level
+$01 = Mario Start, Time Up, etc. + Title Screen + Castle destruction scene
+$02 = Overworld
+$80 = Iggy's and Larry's battle mode
+$C0 = Morton's and Roy's battle mode
+$C1 = Bowser
+7E0D9C 1 49 Empty
+Empty. Cleared during reset and titlescreen load.
+7E0D9D 1 173 Hardware mirror
+Main Screen Setting of Current Level Mode (000abcde a = Object b = BG 4 c = BG 3 d = BG 2 e = BG 1). Appear as TM in LM. Mirror of $212C, transfer only occurs on level load.
+7E0D9E 1 172 Hardware mirror
+Sub Screen Setting of Current Level Mode (000abcde a = Object b = BG 4 c = BG 3 d = BG 2 e = BG 1). Appear as TD in LM. Mirror of $212D, transfer only occurs on level load.
+7E0D9F 1 103 Hardware mirror
+H-DMA Channel Enable: abcdefgh a = Channel 7 .. h = Channel 0: 1 = Enable 0 = Disable. Mirror of $420C.
+7E0DA0 1 187 Player
+Current Player (0 - Player 1, 1 - Player 2). Used by controller Routine.
+Note that the highest bit (#$80) is the "controller 2 plugged in" flag, so you probably want to use $0DB3 instead.
+7E0DA1 1 49 Empty
+Empty. Cleared during reset and titlescreen load.
+7E0DA2 1 26 I/O
+Copy of controller data 1.
+7E0DA3 1 61 I/O
+2nd Player Controller data 1 - All the same values as $7E0015
+7E0DA4 1 26 I/O
+Copy of controller data 2.
+7E0DA5 1 61 I/O
+2nd Player Controller data 2 - All the same values as $7E0017
+7E0DA6 1 38 I/O
+Copy of controller data 1 - One Frame.
+7E0DA7 1 73 I/O
+2nd Player Controller data 1 - All the same values as $7E0015 - One frame
+7E0DA8 1 38 I/O
+Copy of controller data 2 - One Frame.
+7E0DA9 1 73 I/O
+2nd Player Controller data 2 - All the same values as $7E0017 - One frame
+7E0DAA 1 155 I/O
+Player 1 controller disable flags ($4219), 1 frame (to be stored in $16). Format: byetUDLR. b = B, y = Y, e = Select, t = Start, UDLR = Up/Down/Left/Right.
+7E0DAB 1 155 I/O
+Player 2 controller disable flags ($4219), 1 frame (to be stored in $16). Format: byetUDLR. b = B, y = Y, e = Select, t = Start, UDLR = Up/Down/Left/Right.
+7E0DAC 1 136 I/O
+Player 1 controller disable flags ($4218), 1 frame (to be stored in $18). Format: axlr0000. a = A, x = X, l = L, r = R, 0 = null/unused.
+7E0DAD 1 136 I/O
+Player 2 controller disable flags ($4218), 1 frame (to be stored in $18). Format: axlr0000. a = A, x = X, l = L, r = R, 0 = null/unused.
+7E0DAE 1 34 Hardware mirror
+Brightness (0-F). Mirror of $2100.
+7E0DAF 1 66 Misc.
+Mosaic direction. 00 when shrinking size. 01 when increasing size.
+7E0DB0 1 82 Hardware mirror
+Current mosaic pixel size on level load. Mirror of $2106, bits 0 and 1 always set.
+7E0DB1 1 78 Counter
+Is used to keep a mode active.
+If value is positive, game mode doesn't change.
+7E0DB2 1 13 Flag
+2-Player Flag
+7E0DB3 1 29 Player
+Character. 00=Mario; 01=Luigi
+7E0DB4 1 13 Player
+Mario's Lives
+7E0DB5 1 11 Player
+Luigi Lives
+7E0DB6 1 11 Player
+Mario Coins
+7E0DB7 1 11 Player
+Luigi Coins
+7E0DB8 1 13 Player
+Mario Powerup
+7E0DB9 1 13 Player
+Luigi Powerup
+7E0DBA 1 18 Yoshi
+Mario Yoshi Colour
+7E0DBB 1 18 Yoshi
+Luigi Yoshi Colour
+7E0DBC 1 64 Player
+Mario Item Box. 00=Nothing; 01=Mushroom; 02=Cape; 03=Fire Flower
+7E0DBD 1 64 Player
+Luigi Item Box. 00=Nothing; 01=Mushroom; 02=Cape; 03=Fire Flower
+7E0DBE 1 22 Player
+Current player's lives
+7E0DBF 1 22 Player
+Current player's coins
+7E0DC0 1 71 Counter
+Green Star Block Count Counter (starts at 30, decrements for each coin)
+7E0DC1 1 40 Yoshi
+Player can carry Yoshi over levels flag.
+7E0DC2 1 104 Player
+Item in the reserved item aka Item Box. #$00=None; #$01=Mushroom; #$02=Fire Flower; #$03=Star; #$04=Cape
+7E0DC3 4 202 Empty
+Empty. Cleared during reset and titlescreen load. $0DC3 is also cleared when selecting how many players to use (this can be disabled with no known side effects by setting $009E48 (0x02048) to 80 01 EA).
+7E0DC7 2 44 Player
+OW X position of Mario (Same as $7E:1F17(?))
+7E0DC9 2 45 Player
+OW Y position of Mario (Same as $7E:1F19 (?))
+7E0DCB 2 45 Player
+OW X position of Luigi (Same as $7E:1F1B (?))
+7E0DCD 2 45 Player
+OW Y position of Luigi (Same as $7E:1F1D (?))
+7E0DCF 2 58 Player
+Mario's speed on OW map. Index by $1B80 for climbing speed
+7E0DD3 1 56 Overworld
+Player direction. 0 = up, 2 = down, 4 = left, 6 = right.
+7E0DD5 1 87 Misc.
+FF = activate secret event on level exit
+Set #$00 on level end to deactivate auto-walk.
+7E0DD6 1 61 Player
+Current player. Used on the overworld. Is actually $0DB3 * 4.
+7E0DD7 1 213 Should be 00
+While this never is nonzero in a clean ROM, it's expected to be 00 throughout the entire game. $0DD6 (current player (00=Mario, 04=Luigi)) is sometimes used in 16bit mode, so using this one isn't a very good idea.
+7E0DD9 1 49 Empty
+Empty. Cleared during reset and titlescreen load.
+7E0DDA 1 87 Misc.
+Copy of $1DFB, the music register, but is forced to be normal music (nothing above 80.)
+7E0DDB 3 49 Empty
+Empty. Cleared during reset and titlescreen load.
+7E0DDE 1 109 Misc.
+Which file to erase on the erase file screen. Format: xxxxx123. It is also used as an overworld sprite index.
+7E0DDF 1 41 Sprites
+Starting OAM index for overworld sprites.
+7E0DE0 5 260 Sprites
+Seems to be some kind of alternate index for overworld sprites. If the normal sprite index ($0DDE) is less than 5, it is used to index $0DE0, and the result is transferred to X and used as the sprite index instead. The code that handles this is around $04F80D.
+7E0DE5 16 22 Sprites
+OW Sprite Type (table)
+7E0DF5 16 29 Sprites
+Misc. overworld sprite table.
+7E0E05 16 29 Sprites
+Misc. overworld sprite table.
+7E0E15 16 29 Sprites
+Misc. overworld sprite table.
+7E0E25 16 29 Sprites
+Misc. overworld sprite table.
+7E0E35 16 18 Sprites
+OW Sprite XPos Low
+7E0E45 16 18 Sprites
+OW Sprite YPos Low
+7E0E55 16 102 Misc.
+OW Sprite ZPos Low (i.e. distance the sprite is from the ground). May have multiple purposes, however.
+7E0E65 16 19 Sprites
+OW Sprite XPos High
+7E0E75 16 19 Sprites
+OW Sprite YPos High
+7E0E85 16 147 Sprites
+OW Sprite ZPos High (i.e. distance the sprite is from the ground). Probably has no real purpose in the original SMW; it may not be anything but 00.
+7E0E95 16 17 Sprites
+OW Sprite X speed
+7E0EA5 16 17 Sprites
+OW Sprite Y speed
+7E0EB5 16 17 Sprites
+OW Sprite Z speed
+7E0EC5 16 56 Sprites
+Accumulating fraction bits for overworld sprite X speed.
+7E0ED5 16 56 Sprites
+Accumulating fraction bits for overworld sprite Y speed.
+7E0EE5 16 56 Sprites
+Accumulating fraction bits for overworld sprite Z speed.
+7E0EF7 1 71 Misc.
+If negative and Mario is on a level tile, Mario will enter it directly.
+7E0EF8 1 77 Yoshi
+Yoshi has been saved for the first time flag (used for Yoshi's thank message)
+7E0EF9 55 18 Misc.
+Status Bar Tilemap
+7E0F30 1 75 Counter
+Timer Frame Counter. After this reaches $00, the game decrements the timer.
+7E0F31 3 48 Counter
+Timer
+$0F31 = Hundreds
+$0F32 = Tens
+$0F33 = Ones
+7E0F34 3 11 Counter
+Mario Score
+7E0F37 3 11 Counter
+Luigi Score
+7E0F3A 6 45 Empty
+Empty. Cleared on reset and titlescreen load.
+7E0F40 2 99 Counter
+Amount of score to add up to the score total, at level end. (Decrements as total score increments.)
+7E0F42 6 45 Empty
+Empty. Cleared on reset and titlescreen load.
+7E0F48 1 17 Counter
+Mario Bonus stars
+7E0F49 1 17 Counter
+Luigi Bonus Stars
+7E0F4A 20 297 Sprites
+Castle background flame's frame to display. Is also used for Boo ring to determine its speed, 00 = still, 01-7F = counter-clockwise, 80-FF = clockwise.
+Is also used for several other sprites that are generated by one single sprites, such as the ghost ceiling, not necessarily for the same purpose.
+7E0F5E 20 103 Empty
+Empty. Cleared during reset and titlescreen load. Was probably meant to be a misc cluster sprite table.
+7E0F72 20 253 Sprites
+Miscellaneous cluster sprite table. It could theoretically be used for any purpose, but in the original SMW, it holds the index of each individual Boo in a Boo ring (00-09). It is also used in the death bat ceiling to keep track of the bats' Y position.
+7E0F86 20 223 Sprites
+Miscellaneous cluster sprite table, used for various purposes including determining which Boo ring is which and determining whether or not a particular "death bat" is visible. It could theoretically be used for any purpose.
+7E0F9A 20 245 Sprites
+Seems to be a miscellaneous cluster sprite table. It could theoretically be used for any purpose, but in the original SMW, its purposes are as a timer for determining when "death bats" will fly, and as a timer to freeze a boo in the boo ceiling.
+7E0FAE 2 103 Sprites
+Low byte of the angle of the boo ring. $0FAE is for the first Boo ring active; $0FAF is for the second.
+7E0FB0 2 119 Sprites
+High byte of the angle of the circle, of the boo ring. $0FB0 is for the first Boo ring active; $0FB1 is for the second.
+7E0FB2 2 120 Sprites
+Low byte of the X position of the center of a Boo ring. $0FB2 is for the first Boo ring active; $0FB3 is for the second.
+7E0FB4 2 121 Sprites
+High byte of the X position of the center of a Boo ring. $0FB4 is for the first Boo ring active; $0FB5 is for the second.
+7E0FB6 2 120 Sprites
+Low byte of the Y position of the center of a Boo ring. $0FB6 is for the first Boo ring active; $0FB7 is for the second.
+7E0FB8 2 121 Sprites
+High byte of the Y position of the center of a Boo ring. $0FB8 is for the first Boo ring active; $0FB9 is for the second.
+7E0FBA 2 164 Sprites
+Offscreen flag for the Boo ring. If a byte is set to 01, the ring is offscreen and doesn't show up. $0FBA is for the first Boo ring active; $0FBB is for the second.
+7E0FBC 2 232 Sprites
+Indexes for the Boo cluster sprites that make up Boo rings. $0FBC is for one Boo ring active, while $0FBD is for the other. They are used to index the 2-byte tables from $0FAE-$0FBB, although they seem rather pointless due to $18BA.
+7E0FBE 1 218 Pointer
+16-bit pointer table, indexed by Map16 tile number*2. Points to the image to use for a certain Map16 tile. Usually starts with $8000 or $9100 and the value counts up with 8 per 2 RAM addresses. Bank byte should be $0D.
+7E13BE 1 32 Misc.
+Item Memory settings from header
+7E13BF 1 547 Misc.
+Translevel number, set during transfer from world map to level. This identifies the first room of the current level. To convert this to a room number (the "level number" in Lunar Magic), if > $24, then add $DC.
+
+The actual formula is more complex. If translevel number > $24, then subtract $24. Then check RAM $7E:1F11 or $7E:1F12. If the player is in a submap (not the big world map), then add $100. The submaps of Super Mario World use translevel numbers > $24, and the big map uses numbers <= $24, so the simplication is that $100 - $24 is $DC.
+7E13C0 1 321 Should be 00
+While this is never nonzero in the original SMW, $13BF (level number) is sometimes used in 16bit mode. Editing this isn't a very good idea.
+To make this one become useful freeram, change $05D9C9 (0x2DBC9) to E2 10 AC BF 13 B9 08 D6 8D EA 1D (header : lorom : org $05D9C9 : SEP #$10 : LDY $13BF : LDA $D608,y : STA $1DEA).
+7E13C1 1 57 Overworld
+Current Layer 1 overworld tile the player is standing on.
+7E13C2 1 158 Empty
+Cleared during reset, title screen load, and when walking onto a new OW tile.
+Note that it should remain at 00 on the overworld, or various stuff will bug up.
+7E13C3 1 113 Overworld
+Current player's submap (0 = Main Map, 1 = Yoshi's, 2 = Vanilla, 3 = Forest, 4 = Bowser's, 5 = Special, 6 = Star)
+7E13C4 1 223 Should be 00
+While this never is nonzero, it's expected to be 00 throughout the entire game. $13C3 (current player's submap) is often used in 16bit mode, so using it isn't a very good idea (unless you make sure it's cleared on OW load).
+7E13C5 1 109 Misc.
+Increases each time a 3UP moon is collected, serves no other purpose. (Its value is never loaded originally.)
+7E13C6 1 142 Misc.
+Used by SMW's cutscenes. It's from 1-8 and go in the order of the boss battles, e.g. 01 = Iggy's castle, 02 = Morton's castle and 08 = Credits
+7E13C7 1 75 Yoshi
+Yoshi colour (4=yellow, 6=blue, 8=red, A=green - refreshes on level change)
+7E13C8 1 45 Empty
+Empty. Cleared on reset and titlescreen load.
+7E13C9 1 46 Flag
+Show "Continue/End menu on the Overworld" flag
+7E13CA 1 94 Flag
+Show Save Prompt on the overworld flag. It actually triggers when you get on a new level tile.
+7E13CB 1 370 Misc.
+This has been left out in the current SMW version.
+
+When you hit a goal tape, and spawn a starman (which is never), this is set to $01. Now each time you switch an area in a level, this gets multiplied by 2. When this reaches $80 (changed area 7 times), you will start the area with the star power. The instructions which sets this address to $01 is located at $00:FB5C.
+7E13CC 1 163 Counter
+The value you store here is the amount of coins that are being added up to the total. Usually, $13CC is either #$00 or #$01, but it can be set to other values too.
+7E13CD 1 56 Flag
+"Don't activate the midway point when you touch it" flag
+7E13CE 1 17 Flag
+Midway Point flag
+7E13D2 1 280 Misc.
+Multi-purpose flag. Used, for example, for when the level ending flag is set, it acts similarly to when the ! Switches are pressed if value != $00.
+On the OW, it will temporarily spawn ! blocks.
+(#$01 for Yellow, #$02 for Blue, #$03 for Red and #$04 for Green, all others unused).
+7E13D3 1 73 Flag
+Timer that disables Start from flipping the Pause flag, if value isn't 0.
+7E13D4 1 92 Flag
+Pause flag (Levels) and look around the overworld flag (Overworld). [01] activates the flag.
+7E13D6 1 550 Timer
+Amount of time to wait until the score-increasing drumroll begins when you beat a level. Any time you enter a level, this address is set to x50. Once you beat the level and the number of bonus stars you won and the score is displayed (or just the score if you didn't cut the goal tape), this timer will decrement itself once per frame. Once it reaches a negative value or 0, the drumroll will begin. 
+Once the drumroll ends, this is set to x30, and then set to x0 upon going to the overworld. It serves the same purpose after you beat a boss as well.
+7E13D7 1 117 Overworld
+Y speed for the intro march (walking to Yoshi's House). It's in fractions. The higher the value, the lower the speed.
+7E13D9 1 923 Misc.
+"Cause Mario event" on the OW. Probably used when mario just beat a level, the events are activated, etc.
+01 -mario goes down whatever path is available (used when just loading OW after finishing a level, to show events and then make mario walk down them?)
+02 - Freeze mario, does nothing.
+03 - Makes mario face the direction he wants to go
+04 - acts like mario just beat the level, aside from activating events.
+05 - Same as 02
+06 - fade in/out
+07 - switches between mario and luigi (even on 1 player)
+08 - Same as 06
+09 - fades to black.
+0A - Fades in/out like when you enter a new area
+0B - Activates star warp, if no star warp on that tile warps to closest pipe/star etc
+0C - Causes mario to slowly walk forward like he does when you enter the OW for the first time
+
+Also used by the level end march:
+00 - Show up the course clear stuff
+01 - Keep it on the screen?
+02 - Count down timer/convert to score
+03 - Do nothing
+7E13DA 1 57 Player
+Accumulating fraction bits for fixed point Mario X speed.
+7E13DB 1 342 Counter
+Mario Walking Frame Counter. 
+
+While walking, it increments to the values in the table at $00DC78, then zeros and starts over. Its speed is indexed in the table at $00DC7C. 
+
+Not only is it used to control Mario's walking/running animation speed, but also which frame Mario's Y position moves up or down one pixel while walking (see $00E35D).
+7E13DC 1 57 Player
+Accumulating fraction bits for fixed point Mario Y speed.
+7E13DD 1 67 Player
+Pose used when player is turning around. Uses same format as $13E0.
+7E13DF 1 10 Player
+Cape Image
+7E13E0 1 11 Player
+Mario Image
+7E13E1 1 428 Player
+Determines what kind of slope you are on. It's also set when flying with a cape. Possible values are:
+
+$00 - Not on any Slope
+$08 - Gradual Slope Left
+$10 - Gradual Slope Right
+$18 - Normal Slope Left
+$20 - Normal Slope Right
+$28 - Steep Slope Left
+$30 - Steep Slope Right
+$58 - Very Steep Slope Left
+$60 - Very Steep Slope Right
+$68 - Swooping Down while Flying and Facing Left
+$70 - Swooping Down while Flying and Facing Right
+7E13E2 1 165 Player
+Spinjump fireball timer. It increments every frame. If any of the first four bits are set, Mario won't shoot a fireball. If bit 4 ($10) is set, it shoots a fireball.
+7E13E3 1 294 Player
+Mario is wall-running flag.
+0=not wall-running
+2=on bottom left (45° angle)
+3=on bottom right (45° angle)
+4=on top left (45° angle, on top of the wall)
+5=on top right (45° angle, on top of the wall)
+6=on the left wall
+7=on the right wall
+Note that custom blocks doesn't work while wall-running!
+7E13E4 1 229 Player
+Mario Dash Timer. Increases by $02 every frame Mario is walking (and on the ground) with the Dash button held, decrements until at $00 otherwise. $70 indicates Max Running Speed, and means you are ready to take off with the cape.
+7E13E6 2 60 Empty
+Empty. Cleared during reset, titlescreen, OW and level load.
+7E13E8 1 78 Player
+Set to $01 if the game is suppose to run the cape spin interaction with sprite
+7E13E9 2 148 Player
+Determines X position of cape interaction inside the level (relative to screen 0, not the visible part). It's adjusted when the cape attack is used.
+7E13EB 2 148 Player
+Determines Y position of cape interaction inside the level (relative to screen 0, not the visible part). It's adjusted when the cape attack is used.
+7E13ED 1 69 Player
+Player's image on a slope. Is $1C when sliding, and $00 when walking.
+7E13EE 1 388 Player
+This address has to do with sliding on slopes. It tells what kind of slope he's on.
+
+If Mario's not on a slope, it's zero.
+
+If he is, it will be:
+FC = Very Steep Slope Left
+FD = Steep Slope Left
+FE = Normal Slope Left
+FF = Gradual Slope Left
+01 = Gradual Slope Right
+02 = Normal Slope Right
+03 = Steep Slope Right
+04 = Very Steep Slope Right
+
+(This is what Lunar Magic calls these slopes)
+7E13EF 1 337 Player
+Mario is on ground flag. Is only set to #$01 if touching the floor, and ignores touching sides, ceilings, and running up walls. Does not work correctly in blocks. (Except for sprite offsets for some reason. -Meaning, a custom block can only detect if Mario is on the ground/in air when a sprite is touching it but not Mario touching it.)
+7E13F1 1 28 Flag
+Vertical Scroll enable flag.
+7E13F3 1 162 Timer
+When you get a P-balloon, this is set to 9. Each frame afterwards, this is decremented until it gets to 1, at which point Mario begins to show his inflated frame.
+7E13F4 5 141 Blocks
+A byte assigned to each row of blocks in the coin bonus game. Updated as blocks are chosen by Mario to decide whether a life is given or not.
+7E13F9 1 28 Flag
+Mario goes behind stuff flag
+7E13FA 1 115 Player
+Set to 1 if mario could jump out of the water if he wanted to. 0 otherwise. Would be great for making an air meter.
+7E13FB 1 227 Player
+Mario is frozen flag. This includes controls and animation. Other sprites still move and can interact with Mario, but cause the game to mess up if they touch him. This may be useful for cutscenes to eliminate the jumping sound.
+7E13FC 1 234 Misc.
+Currently active boss. Used for determining which graphics to load.
+00=Morton
+01=Roy
+02=Ludwig
+03=Bowser
+04=Reznor
+Note that Iggy, Lemmy, Wendy and Larry doesn't set this. Cleared on level->OW transitions, possibly at other times too.
+7E13FD 1 157 Flag
+When the R or L triggers are pressed this address gets set to 01 which briefly freezes the screen while the screen scrolls in whatever direction you pressed.
+7E13FE 1 65 Misc.
+02 = scroll right, 04 = scroll left. Is used when L/R is pressed.
+7E13FF 1 119 Player
+The player's direction ($76) times 2. Used in the L/R screen-scrolling routine to determine where the screen will stop.
+7E1401 1 80 Timer
+Amount of time you need to press the L/R button to be able to scroll the screen.
+7E1402 1 123 Blocks
+A flag that is set when Mario is on a note block that is currently going down. (i.e. the bounce sprite is moving downwards)
+7E1403 1 118 Misc.
+Tide settings for current layer 3 image
+00 - Not a tide image
+01 - Water level changes
+02 - Water level doesn't change
+7E1404 1 131 Flag
+A cape flag. Seems to be set when the player lands on the top of a slope while landing, but it doesn't seem to have a real purpose.
+7E1405 1 203 Flag
+Indicates that the player is just about to warp to another level via a pipe. It is set as soon as $88 reaches 0, and it is used in determining how to draw Yoshi when he is in a pipe (as a boolean value).
+7E1407 1 110 Player
+Mario is flying actions:
+$01 = Low-gravity?
+$03 = Horizontal handling?
+$06 = Smash the ground and kill stuff.
+
+7E140A 1 91 Empty
+Unused RAM. Cleared on reset, titlescreen load, and during part of the cape flight routine.
+7E140B 2 54 Empty
+Unused RAM. Cleared during reset and titlescreen load.
+7E140D 1 73 Flag
+Spin Jump flag. 00=normal jump (or on ground), anything else=spinjumping.
+7E140F 1 178 Flag
+Keeps increasing as long as you are in the Reznor boss battle room. Likely to be used as a flag to determine which OAM index the smoke tiles coming from Mario's feet should have.
+7E1410 1 90 Flag
+Yoshi Has Wings flag # 1. The value 02 enables it. This doesn't handle the flying ability.
+7E1411 1 119 Flag
+Horizontal scroll settings from header flag. If clear, disable horizontal scrolling. Else, enable horizontal scrolling.
+7E1412 1 36 Misc.
+Vertical scroll settings from header
+7E1413 1 64 Misc.
+Horizontal scroll setting (0 = None, 1 = Constant, 2 = Variable)
+7E1414 1 72 Misc.
+Vertical scroll setting (0 = None, 1 = Constant, 2 = Variable, 3 = Slow)
+7E1419 1 206 Sprites
+Somewhat of a "Sprites go behind stuff" flag.
+00-No effect
+01-Any sprite Mario is holding will go behind objects (includes riding Yoshi)
+02-Same as 0x01, but the sprite has the same XY coordinates as Mario.
+7E141A 1 213 Counter
+Counter that increments every time a new level is entered (with a door or pipe) - this enables you to distinguish the 'mother'-level from sublevels. Note: Don't enter a new level 256 times, or a glitch will occur.
+7E141C 1 56 Flag
+Secret Goal Sprite flag (not checked in vertical levels)
+7E141D 1 25 Flag
+Disable Mario Start! Flag
+7E141E 1 187 Yoshi
+Yoshi has wings flag. The only possible value for this address in the original is #$02, but setting to #$01 will allow Mario to throw fireballs if on Yoshi (even if he is not Firey Mario)
+7E1420 1 50 Counter
+Yoshi Coins collected. Does not affect status bar.
+7E1421 1 97 Counter
+Counter used by the invisible 1up checkpoint (starts from 0, increases after touching each block)
+7E1422 1 92 Counter
+Amount of Yoshi Coins to display on the status bar. (Values 01-04 will make it display any.)
+7E1423 1 259 Misc.
+Indicates which switch palace switch is being pressed. Its value also varies depending on which side of the switch was pressed. (Left side -> it uses the first value, right side -> it uses the second.) 01/02 = green, 05/06 = yellow, 09/0A = blue, 0D/0E = red.
+7E1425 1 93 Misc.
+Bonus game - If set, Mario will be sent to the bonus game when you change areas in the level.
+7E1426 1 70 Misc.
+Message Box Trigger (1=Message 1, 2=Message 2, 3=Yoshi thanks message)
+7E1427 1 97 Misc.
+Bowser clown car image.
+00-Regular
+01-Blinking
+02-Hurt
+03-Angry face
+Above: cycles through above.
+7E142A 1 249 Player
+Where Mario has to be on the screen in order to justify moving the screen. If Mario's screen xpos is less than $142A - #$0C, then the screen will move left. If Mario's screen xpos is greater than or equal to $142A + #$0C, the screen will move right.
+7E142C 4 277 Camera
+Two 16-bit addresses, $142C and $142E, are set to $142A - #$000C and $142A + #$000C respectively during the screen-scrolling routine, read from to determine whether or not to scroll the screen, and never referenced again in the entire code of SMW. Could be used as scratch RAM.
+7E1432 1 216 Flag
+Directional coin activation flag. This is set to 01 when the sprite changes the music, and it is used to prevent the player being able to spawn any more than one instance of the sprite. (It carries across sublevels.)
+7E1433 1 205 Timer
+Scaling factor of the growing circle before the Titlescreen starts.
+Starts at 0, circle gets bigger when the value increases.
+Loads titlescreen when value becomes #$F0 or higher.
+Also used for the keyhole.
+7E1434 1 36 Misc.
+Set to #$30 to end level via keyhole
+7E1435 1 31 Flag
+Keyhole growing/shrinking flag.
+7E1436 2 19 Sprites
+Keyhole X position.
+7E1438 2 19 Sprites
+Keyhole Y position.
+7E143A 1 113 Flag
+When set to a non-zero value, it will load the "Mario Start!" tiles (Mario GFX will be replaced with the letters)
+7E143B 1 66 Misc.
+Death Message. $1D = "Time up!" Message. $14 = "Game Over" Message
+7E143C 1 116 Timer
+Death Message Animation timer.
+
+(For example, when "Game" and "Over" come to each other like this: Game --> <--Over)
+7E143D 1 39 Timer
+How long the Death Message lasts timer.
+7E143E 1 108 Sprites
+Scrolling command number. Basically the sprite value you find in Lunar Magic - #$E7. 0F-FF are incompatible.
+7E1440 1 108 Sprites
+The starting Y-position of the current scroll sprite, left-shifted twice, with the extra bits added to them.
+7E1442 1 626 Misc.
+Various flags used in the Yoshi's House portion of the credits scene. Possible values:
+$00 = Mario and companion walks in
+$01 = Various Yoshis duck and watch in excitement.
+$02 = Eggs are shattering, one by one.
+$03 = Yoshis get up and "THANK YOU" appears on Yoshi's house.
+$04 = Yoshis jump in excitement, then screen fades out.
+24-bit pointers for these actions are located at SNES $0C:A1DE
+Also used in the castle destruction sequence:
+$00 = Mario walks in, hits the switch and the fuse goes down
+$01 = The frame the fuse hits the castle
+$02 = "BOMB"
+$03 = The frame "BOMB" stops
+$04 = Castle falling
+$05 = Rest of sequence
+7E1443 1 168 Timer
+Castle destruction sequence text timer. Starts at xFF when the 'Welcome' music starts, and a new line of text appears every x20 frames after that. (xDF, xBF, x9F, ect.)
+7E1446 2 188 Misc.
+Speed to give the player when he's touching the side of a screen, during a level which does not have regular Layer 1 scrolling. Values are different depending on the type of (auto-)scroll.
+7E1448 2 97 Misc.
+Layer 3 Y speed at the staff roll in the credits. $0000-$7FFF = Upwards, $8000-$FFFF = Downwards.
+7E144A 2 95 Misc.
+Misc. address, used inside scroller codes. Used as, among others, speed for the fast BG scroll.
+7E144D 1 73 Timer
+Time until you can press a button to end the castle destruction sequence.
+7E1460 1 27 Misc.
+Layer 3 scrolling direction
+7E1462 2 35 Misc.
+Layer 1 X position (level) (16-bit)
+7E1464 2 35 Misc.
+Layer 1 Y position (level) (16-bit)
+7E1466 2 25 Misc.
+Layer 2 X position(level)
+7E1468 2 25 Misc.
+Layer 2 Y position(level)
+7E1470 1 23 Misc.
+Carrying something flag
+7E1471 1 245 Misc.
+Determines what type of platform you are on. I.E., 01 is for the floating rock. It enables you to jump and run in the air. Followed by a sinking effect. The same effect you get when standing on a floating rock. This is on Yoshi's Island 4 stage.
+7E147A 1 133 Misc.
+Position of the left border of the window that the spotlight creates. Goes from ~13-71 and decrements/increments by 3 every 3 frames.
+7E147C 1 134 Sprites
+Position of the right border of the window that the spotlight creates. Goes from ~8F-EB and decrements/increments by 3 every 3 frames.
+7E148B 2 73 Misc.
+Used by random number generation subroutine to determine the next output.
+7E148D 2 64 Misc.
+Output of random number generation routine, located at $01:ACF9.
+7E148F 1 45 Player
+Flag used to detect if Mario holds an object.
+7E1490 1 43 Timer
+Star timer ($FF=16 (hex) sec on game timer)
+7E1491 1 397 Sprites
+Amount of pixels on the X/Y axis a sprite has moved in the current frame. It is set after every call to update sprite position based on speed, and the routine that updates both X/Y position based on speed will leave $1491 with the movement on the X axis in this address. Very often used for rideable sprites as this address can be added to mario's position to move Mario in tandem with the sprite.
+7E1492 1 47 Timer
+Mario Peace Image (level finished march) timer.
+7E1493 1 244 Timer
+End level timer. Setting to FF will end the level as a goal sphere; however, this is a timer. If your code always sets this address, then it will never end.
+Setting it to 01 (even repeatly) will make it flash with ugly colors and end the level.
+7E1495 1 106 Misc.
+Something related about the fadeout after you defeat a boss. Seems to stop increasing when it reaches $40.
+7E1496 1 22 Player
+Mario Hurt Frame Timer
+7E1497 1 25 Player
+Flashing Invincible Timer
+7E1498 1 56 Player
+Time to show Mario's Ducking while holding an item pose.
+7E1499 1 35 Player
+Timer for Mario to face the screen.
+7E149A 1 34 Player
+Time to show Mario's kicking Pose.
+7E149B 1 67 Player
+Time for Mario to change through palettes (Used for fire animation)
+7E149C 1 75 Player
+Time to show Mario shooting a fireball pose (Includes in air and on ground)
+7E149D 1 369 Timer
+Side flipping climbing net sprite flag and timer. Whenever you punch the flipping net, this gets set to #$1E and decrements every frame till it's zero. That's how many frames the spinning animation lasts. It also determines the X speed the player has while he's on the climbing net sprite - this means that it should be decremented every frame in order to avoid issues.
+7E149E 1 386 Timer
+Mario punches while climbing on a net flag and timer. Every time you punch a net this is set to #$09 and decremented till it's zero again. During the time it's not zero the punching a net Mario frame is displayed. If you store #$09 or greater to it every frame you'll be hold onto the net without being able to move or get off.
+While this RAM address is non-zero, Mario also can't move.
+7E149F 1 339 Timer
+This timer controls the player's ability to fly with a cape. #$00 and #$01 = disable flight. #$02 = go into bounce flight. #$03-#$FF = Rise up into the air indefinately after a run and jump.
+Everytime you run and jump off the ground this timer is set to #$50 and decremented every frame till it's #$00. Or if you spin jump it stops at #$02
+7E14A0 1 87 Timer
+Is set to $10 when the player is running and is supposed to display the running images.
+7E14A1 1 48 Timer
+"Player slides a bit when turning around" timer.
+7E14A3 1 57 Yoshi
+How long Yoshi's tongue will go out before going back in.
+7E14A5 1 58 Misc.
+Is set to $10 when Mario is flying in the air with a cape.
+7E14A6 1 16 Player
+Cape spin timer.
+7E14A7 1 219 Timer
+Timer for breaking the bridge in Reznor battles. (Not to be confused with $1B9F.) It is set to 40 and decrements. When it reaches 3C, a tile on each side breaks. When it drops to 00, it immediately is reset to 40 again.
+7E14A8 3 180 Misc.
+Unused, and decrement every frame automatically until they reaches 00. $14A9 is cleared when Mario ground pounds with the cape, and $14AA is set to #$40 when Yoshi grabs the wings.
+7E14AB 1 235 Timer
+Bonus game ending timer. Does nothing in a normal level, but during a bonus game, setting it will end the bonus game and return to the overworld. At 44 it starts the "end bonus game" music, and at 01 it actually fades to the overworld.
+7E14AC 1 66 Empty
+Unused, but decrements every frame automatically until it hits 00.
+7E14AD 1 14 Timer
+Blue POW Timer
+7E14AE 1 16 Timer
+Silver POW Timer
+7E14AF 1 53 Flag
+On/Off Switch Value. 00 is ON and all others are OFF.
+7E14B0 2 81 Sprites
+Initial X position of the swinging platform currently being processed, plus 0x18.
+7E14B2 2 190 Sprites
+Initial Y position of the swinging platform currently being processed, plus 0x68.
+Used when Bowser is scaling (before the flames fall out of the sky).
+0 = shrinking
+1 = growing
+2 = disappear
+7E14B4 2 81 Sprites
+Initial X position of the swinging platform currently being processed, plus 0x68.
+7E14B8 2 173 Sprites
+X position of the first (outermost) chain tile of the swinging platform currently being processed. Writing to it doesn't seem to affect the movement of the platform, though.
+7E14BA 2 173 Sprites
+Y position of the first (outermost) chain tile of the swinging platform currently being processed. Writing to it doesn't seem to affect the movement of the platform, though.
+7E14C8 12 284 Sprites
+Sprite Status Table.
+00=Non-existant
+01=Initial
+02=Killed, falling off screen
+03=Smushed
+04=Spinjumped
+05=Sinking in lava
+06=Turn into coin at lvl end
+07=Stay in Yoshi's mouth
+08=Normal routines
+09=Stationary/Carryable
+0A=Kicked
+0B=Carried
+0C=Powerup from being carried past goaltape.
+7E14D4 12 29 Sprites
+Sprite Ypos High Byte (table)
+7E14E0 12 29 Sprites
+Sprite Xpos High Byte (table)
+7E14EC 12 51 Sprites
+Accumulating fraction bits for fixed point Y speed.
+7E14F8 12 51 Sprites
+Accumulating fraction bits for fixed point X speed.
+7E1504 12 91 Sprites
+Sprite table that is not restricted to one predefined purpose. Is used as e.g. throw timer.
+7E1510 12 115 Sprites
+Misc. sprite table apparently. Used in the brown platform's graphics routine but nowhere else in SMW's entire code.
+7E151C 12 315 Sprites
+Sprite table that is not restricted to one predefined purpose. Is used for vertical direction in SMW, and Yoshi uses it to determine which sprite to spawn out of an egg. $1520-$1523 is a 'Reznor killed flag'. If a byte is set to $01, the Reznor will disappear. Byte 1 is for Reznor 1, Byte 2 for Reznor 2 and so on.
+7E1528 12 133 Sprites
+Sprite table that is not restricted to one predefined purpose. In SMW it's used for Chargin' Chuck HP, Thwomp's face expression, etc.
+7E1534 12 926 Sprites
+Sprite table that does not affect most of the common sprites. It's a table that is not restricted to one predefined purpose.
+
+Certain powerups use this table as a blink-fall flag:
+$00 => off.
+$01 => on, powerup will blink and fall straight down.
+
+The game stores $01 here when it drops the reserved item from the item box. The blink-fall flag affects the Super Mushroom and the Fire Flower, but not the Cape Feather. The blink-fall flag also affects some other sprites, at least the Starman, the 1up Mushroom and the sprite-coin (from fireballing enemies), but these sprites might glitch if you set the flag.
+One glitch is that the blinking sprite-coin permanently occupies a sprite slot if it falls off the level, so might prevent the spawning of other common sprites.
+
+This table might also have an unknown affect to a few other sprites. Value $01 seems to cause Super Koopas to flash their capes (but not to give feathers).
+7E1540 12 330 Sprites
+Sprite table that is not restricted to one predefined purpose. This table already decrements by itself once per frame.
+
+Some sprites use this table as a stun timer. For example, this timer controls when flipped Goombas and squashed Mecha-Koopas decide to rise and walk. This table is also the Sprite Spin Jump Death Frame Counter.
+7E154C 12 171 Sprites
+Time to disable sprite's contact with Mario. If that function is not used, it's a table with no predefined purpose. This table already decrements by itself once per frame.
+7E1558 12 218 Sprites
+Timer for how long the sprite should sink in lava, and various other things. However, if not using these features, it's merely a table with no predefined purpose. This table already decrements by itself once per frame.
+7E1564 12 108 Sprites
+Time to disable sprite's contact with other sprites. This table already decrements by itself once per frame.
+7E1570 12 252 Sprites
+Sprite table that does not have a predefined purpose. In SMW, it's used as a frame counter for timed lifts (amount of frames until it hits zero), a frame counter that indicates when sprites 00-13 that have the 'Follow player' flag set should turn, etc.
+7E157C 12 128 Sprites
+Sprite table that is not restricted to one predefined purpose. Often used as horizontal sprite direction table (0=Right, 1=Left)
+7E1588 12 66 Sprites
+Sprite blocked status table. Format: ???xUDLR. The ?s are unknown.
+7E1594 12 254 Sprites
+Sprite table that has no predefined purpose. (Read: Can be used for any purpose.) In classic Piranha Plants, it is used to check if the sprite should be made visible and have interaction with Mario. (If it's any non-zero value, it will become invisible.)
+7E15A0 12 34 Sprites
+Sprite off screen flag, horizontal
+7E15AC 12 201 Sprites
+Sprite table that is not restricted to one predefined purpose. This table already decrements by itself once per frame. In SMW, it is often used as a timer to determine how long it takes to turn around.
+7E15B8 12 291 Sprites
+Determines what kind of slope a sprite is on. Possible values:
+FC = very steep slope left
+FD = steep slope left
+FE = normal slope left
+FF = gradual slope left
+00 = flat ground (or in the air)
+01 = gradual slope right
+02 = normal slope right
+03 = steep slope right
+04 = very steep slope right
+7E15C4 12 158 Sprites
+A table which is set to $01 if the sprite in question is off-screen. For example, the rings of the Ball 'n' Chain are never drawn if this is a non-zero value.
+7E15D0 12 29 Sprites
+Sprite Being Eaten Flag Table
+7E15DC 12 91 Sprites
+Table Related to sprite interaction with objects. Set and the sprite falls through objects.
+7E15E8 1 59 Empty
+Unused RAM. Resets everytime you fade out to the overworld.
+7E15E9 1 60 Sprites
+Sprite index for the current sprite that is being processed.
+7E15EA 12 21 Sprites
+Sprite's index to OAM
+7E15F6 12 89 Sprites
+Sprite Palette/GFX High Byte Table - (Tile#Hi - 2) + 2 * (Palette# - 8). YXPPCCCT format.
+7E1602 12 94 Sprites
+Sprite table that is not restricted to one predefined purpose. Often used as graphics pointer.
+7E160E 12 194 Sprites
+Sprite table that has no predefined purpose. In SMW, it is used to keep track of things such as the green bouncing Koopa's Y speed and the sprite number of certain spawned, kicked, etc. sprites.
+7E161A 12 93 Sprites
+Sprite's index to level table - set to FF to prevent from reloading it once it goes offscreen
+7E1626 12 110 Sprites
+Consecutive enemies killed by a sprite table. Each byte is how many sprites that particular sprite has killed.
+7E1632 12 31 Sprites
+Sprite Interaction Disable Flag
+7E163E 12 118 Sprites
+Sprite table that is not restricted to one predefined purpose. This table already decrements by itself once per frame.
+7E164A 12 55 Sprites
+Sprite Follower Table (0=None, 1-7F=Clouds, 80-FF=Fire)
+7E1656 12 172 Sprites
+Sprite properties, first Tweaker/MWR byte.
+Format: sSjJcccc
+s=Disappear in cloud of smoke
+S=Hop in/kick shells
+j=Dies when jumped on
+J=Can be jumped on
+cccc=Object clipping
+7E1662 12 144 Sprites
+Sprite properties, second Tweaker/MWR byte.
+Format: dscccccc
+d=Falls straight down when killed
+s=Use shell as death frame
+cccccc=Sprite clipping
+7E166E 12 201 Sprites
+Sprite properties, third Tweaker/MWR byte.
+Format: lwcfpppg
+l=Don't interact with layer 2
+w=Disable water splash
+c=Disable cape killing
+f=Disable fireball killing
+ppp=Palette
+g=Use second graphics page
+7E167A 12 378 Sprites
+Sprite properties, fourth Tweaker/MWR byte.
+Format: dpmksPiS
+d=Don't use default interaction with Mario
+p=Gives power-up when eaten by Yoshi
+m=Process interaction with Mario every frame
+k=Can't be kicked like a shell
+s=Don't change into a shell when stunned
+P=Process while off screen
+i=Invincible to star/cape/fire/bouncing bricks
+S=Don't disable clipping when killed with star
+7E1686 12 284 Sprites
+Sprite properties, fifth Tweaker/MWR byte.
+Format: dnctswye
+d=Don't interact with objects
+n=Spawns a new sprite
+c=Don't turn into a coin when goal passed
+t=Don't change direction if touched
+s=Don't interact with other sprites
+w=Weird ground behavior
+y=Stay in Yoshi's mouth
+e=Inedible
+7E1692 1 33 Sprites
+Sprite Memory setting from header
+7E1693 1 57 Blocks
+Block # in block code (low byte; high byte is Y register)
+7E1697 1 27 Counter
+Consecutive enemies stomped
+7E1698 1 40 Sprites
+Used as index to minor extended sprites.
+7E1699 4 60 Sprites
+Block Bounce Sprite Image Table / Block Bounce sprite number
+7E169D 4 27 Sprites
+Block Bounce Sprite ? Table
+7E16A1 4 39 Sprites
+Block Bounce Sprite Ypos Low Byte Table
+7E16A5 4 39 Sprites
+Block Bounce Sprite Xpos Low Byte Table
+7E16A9 4 40 Sprites
+Block Bounce Sprite Ypos High Byte Table
+7E16AD 4 40 Sprites
+Block Bounce Sprite Xpos High Byte Table
+7E16B1 4 32 Sprites
+Block Bounce Sprite YSpeed Table
+7E16B5 4 32 Sprites
+Block Bounce Sprite XSpeed Table
+7E16C1 4 36 Sprites
+Block Bounce Sprite Turns Into Table
+7E16C5 4 39 Sprites
+Block Bounce Sprite Bouncing Flag Table
+7E16C9 4 84 Sprites
+Block Bounce Sprite Table that handles whether the sprite is on Layer 1 or Layer 2/3
+7E16CD 4 37 Sprites
+Block Bounce Sprite Exists Flag Table
+7E16E1 6 284 Sprites
+Score/1up Sprite Type (table)
+#$00: None
+#$01: 10 points
+#$02: 20 points
+#$03: 40 points
+#$04: 80 points
+#$05: 100 points
+#$06: 200 points
+#$07: 400 points
+#$08: 800 points
+#$09: 1000 points
+#$0A: 2000 points
+#$0B: 4000 points
+#$0C: 8000 points
+#$0D: 1UP
+#$0E: 2UP
+#$0F: 3UP
+#$10: 5UP
+7E16E7 6 38 Sprites
+Score/1up sprite Ypos low byte (table)
+7E16ED 6 39 Sprites
+Score/1up Sprite X-pos low byte (table)
+7E16F3 6 40 Sprites
+Score/1up Sprite X-pos high byte (table)
+7E16F9 6 41 Sprites
+Score/1up Sprite Y-pos, high byte (table)
+7E16FF 6 39 Sprites
+Score/1up Sprite Movement/Speed (table)
+7E1705 6 36 Sprites
+Score/1up Sprite Inital Ypos (table)
+7E170B 8 493 Sprites
+Type of extended sprite (0-12):
+00 - Free slot
+01 - Puff of smoke with various objects
+02 - Reznor fireball
+03 - Flame left by hopping flame
+04 - Hammer
+05 - Mario fireball
+06 - Bone
+07 - Lava Splash (doesn't hurt, parabolic down)
+08 - Torpedo Ted shooter's arm
+09 - Red thing that flickers from 16x16 to 8x8
+0A - Coin from cloud game
+0B - Piranha fireball
+0C - Lava lotus fire
+0D - Baseball
+0E - Flower of Wiggler
+0F - Trail of smoke
+10 - Spin Jump star
+11 - Yoshi fireballs
+12 - Water bubble
+7E1713 1 62 Sprites
+Fireball 2 Status (0=Doesn't Exist, 1=Hit Something, 5=Exists)
+7E1714 1 62 Sprites
+Fireball 1 Status (0=Doesn't Exist, 1=Hit Something, 5=Exists)
+7E1715 10 76 Sprites
+Extended sprite Y position, Low Byte. Last two bytes reserved for fireballs.
+7E171F 10 76 Sprites
+Extended sprite X position, Low Byte. Last two bytes reserved for fireballs.
+7E1729 10 77 Sprites
+Extended sprite Y position, High Byte. Last two bytes reserved for fireballs.
+7E1733 10 77 Sprites
+Extended sprite X position, high byte. Last two bytes reserved for fireballs.
+7E173D 10 63 Sprites
+Extended sprite Y speed. Last two bytes reserved for fireballs.
+7E1747 10 63 Sprites
+Extended sprite X speed. Last two bytes reserved for fireballs.
+7E1751 10 104 Sprites
+Accumulating fraction bits for extended sprite Y speed. The last 2 bytes are for the player's fireballs.
+7E175B 10 160 Sprites
+Accumulating fraction bits for extended sprite X speed. The last 2 bytes are for the player's fireballs. The fireballs also use this table for a hit flag table.
+7E1765 8 137 Sprites
+Extended sprite table. Most extended sprites increment this table and use it for their GFX table. (Use a different image every x frames.)
+7E176F 10 67 Sprites
+Fireball Hit Frame Counter Table. Only the last two bytes are used.
+7E1779 8 39 Sprites
+Extended sprite goes behind stuff flag.
+7E1781 1 33 Sprites
+Fireball 2 Goes Behind Stuff Flag
+7E1782 1 33 Sprites
+Fireball 1 Goes Behind Stuff Flag
+7E1783 8 76 Sprites
+Shooter number table. (Bullet Bill shooter = #$01, Torpedo Launcher = #$02.)
+7E178B 8 49 Sprites
+Related to the Y position of a shooter (low byte)
+7E1793 8 50 Sprites
+Related to the Y position of a shooter (high byte)
+7E179B 8 49 Sprites
+Related to the X position of a shooter (low byte)
+7E17A3 8 50 Sprites
+Related to the X position of a shooter (high byte)
+7E17AB 8 63 Sprites
+Amount of time it takes for a shooter to shoot the next sprite.
+7E17B3 8 123 Sprites
+Table which holds the index for 'sprite being reloaded' for the table at $1938, for shooters. Shooters are always reloaded.
+7E17BB 1 157 Empty
+Contains the low byte of the level number when loading the levels, but never read by anything. It's cleared when the loading is done. Can be used as freeram.
+7E17BE 1 158 Misc.
+How much layer 2 moved compared to the previous frame. Used when Mario should be still compared to a moving L2 (used for the L2 horizontal scroll sprite, E4).
+7E17C0 4 128 Sprites
+Smoke images.
+00=Nothing
+01=Puff of smoke
+02=Contact graphic
+03=Smoke when Mario turns around abruptly
+04=None
+05=Glitter sprite
+7E17C4 4 31 Sprites
+Y low position of smoke images.
+7E17C8 4 31 Sprites
+X low position of smoke images.
+7E17CC 4 39 Sprites
+Amount of time to show the smoke image.
+7E17D0 4 75 Sprites
+"Spinning coin coming out of ? block" table. It's a free slot if it's zero.
+7E17D4 4 54 Sprites
+Y position of spinning coin from a ? block (low byte).
+7E17D8 4 75 Sprites
+Y speed of spinning coin spawned by ? block. $20-$9F will erase the sprite.
+7E17DC 4 74 Sprites
+Accumulating fraction bits of Y speed of spinning coin spawned by ? block.
+7E17E0 4 54 Sprites
+X position of spinning coin from a ? block (low byte).
+7E17E4 4 216 Sprites
+Table for spinning coin from a ? block. Value depends on whether the block is processed on Layer 1 or Layer 2 - the bounce sprite / smoke image will adjust its position relative to the layer in which it is processed.
+7E17E8 4 55 Sprites
+Y position of spinning coin from a ? block (high byte).
+7E17EC 4 55 Sprites
+X position of spinning coin from a ? block (high byte).
+7E17F0 12 287 Sprites
+Minor Extended Sprites type.
+00=None
+01=Piece of brick block
+02=Small star
+03=Cracked shell (Yoshi egg)
+04=Fireball from Podoboo
+05=Small star?
+06=Rip van Fish Z tile
+07=Water splash
+08=Rip van Fish Z tile (unused)
+09=Rip van Fish Z tile (unused)
+0A=Boo Stream tile
+0B=Unused Yoshi smoke
+7E17FC 12 40 Sprites
+Minor Extended Sprite's Y position, low.
+7E1808 12 40 Sprites
+Minor Extended Sprite's X position, low.
+7E1814 12 41 Sprites
+Minor Extended Sprite's Y position, high.
+7E1820 12 32 Sprites
+Minor Extended Sprite's Y speed.
+7E182C 12 32 Sprites
+Minor Extended Sprite's X speed.
+7E1838 12 73 Sprites
+Accumulating fraction bits for fixed point minor extended sprite Y speed.
+7E1844 12 73 Sprites
+Accumulating fraction bits for fixed point minor extended sprite X speed.
+7E1850 12 54 Sprites
+Minor Extended Sprite timer, how long it stays active.
+7E185C 1 44 Player
+Mario falls through interactive layers flag.
+7E185D 1 263 Sprites
+Related to the spawning of extended sprites. Used to index $17F0 (minor extended sprite type table) if there are no empty slots when an extended sprite needs to be spawned. This is so that the oldest extended sprite can be removed when a new one needs to be made.
+7E185E 1 224 Sprites
+Sometimes used to keep track of a tile to generate at $00BEB0 (before storing to $9C). Also used to determine Y position of Mario when he's on the line guided rope, used to determine positions and such of Yoshi's tiles, etc.
+7E185F 1 332 Sprites
+This is the low byte of the Map16 tile (actual tile number, not "acts like" setting) that a sprite is touching vertically.
+
+This is set after $019138, the subroutine that allows the sprite to interact with objects, is called. (This includes $01802A, the routine that updates the sprite's position with gravity, which calls $019138.)
+7E1860 1 334 Sprites
+This is the low byte of the Map16 tile (actual tile number, not "acts like" setting) that a sprite is touching horizontally.
+
+This is set after $019138, the subroutine that allows the sprite to interact with objects, is called. (This includes $01802A, the routine that updates the sprite's position with gravity, which calls $019138.)
+7E1861 1 101 Sprites
+Which sprite to overwrite if all slots are full. Used for blocks containing sprites and the item box.
+7E1862 1 335 Sprites
+This is the high byte of the Map16 tile (actual tile number, not "acts like" setting) that a sprite is touching horizontally.
+
+This is set after $019138, the subroutine that allows the sprite to interact with objects, is called. (This includes $01802A, the routine that updates the sprite's position with gravity, which calls $019138.)
+7E186B 1 111 Blocks
+Multiple Coin Block timer. Set to 01 and the block becomes unused instantly. Set to FF for maximum time length.
+7E186C 12 32 Sprites
+Sprite off screen flag, vertical
+7E1878 1 506 Sprites
+Indicates where the player is on the X axis in relation to the currently-active revolving net door sprite. If this is 00, the player is perfectly centered on the sprite horizontally. It will be positive if the player is toward the left side of the sprite (the farther left, the bigger the positive number) and negative if the player is toward the right side of the sprite (the farther right, the bigger the negative number).
+
+Is used to calculate the player's X speed as the net is turning around sideways.
+7E1879 1 41 Empty
+Unused RAM. Cleared on level and OW load.
+7E187A 1 36 Yoshi
+Riding Yoshi Flag (0=No, 1 or 2=Yes)
+7E187B 12 422 Sprites
+Sprite Stomp Immunity Flag Table. The changing item sprite uses it to determine which sprite it is. (#$00 = mushroom, #$40 = fire flower, #$80 = feather, #$C0 = star).
+Also used for things such as determining whether the goal tape should use the normal exit or the secret one, to hold the radius of rotating chain sprites, handling Yoshi abilities, etc. Most likely a miscellaneous sprite table with no predefined purpose.
+7E1887 1 20 Timer
+Time to shake ground
+7E1888 2 60 Misc.
+Layer 1 Image Y position, used by RAM $7E1887 (Shake ground)
+7E188A 1 98 Empty
+Empty. Cleared on death, level load, and in the Peach Rescued scene (not sure about details here).
+7E188B 1 84 Misc.
+Something related about Mario's Image Y position, used by RAM $7E1887 (Shake Ground)
+7E1890 1 46 Sprites
+How many 1UPs to spawn. (Used for bonus game.)
+7E1891 1 17 Timer
+P-balloon's timer
+7E1892 20 283 Sprites
+Cluster sprites type. 00 = None (free slot), 01 = 1UP (bonus game), 02 = Unused (Would crash if used), 03 = Boo from ghost ceiling, 04 = Boo from Boo ring, 05 = castle candle flame, 06 = Sumo Brother flame, 07 = Reappearing ghost, 08 = Death bat. The pointer for those is at $02F825.
+7E18A6 1 138 Empty
+Unused RAM. Referenced at $01CF9E (Morton's code) but never actually used. Cleared during reset, titlescreen load, OW load and level load.
+7E18AC 1 34 Yoshi
+Yoshi Swallow Frame Counter/Status
+7E18AD 1 237 Yoshi
+Frame counter for Yoshi's walking frames. It goes from 00 to 02, resetting after it gets higher than 02. Interestingly, it acts the same when the player is floating on Yoshi with a cape as well, even though Yoshi's graphics don't change.
+7E18AE 1 182 Timer
+State pointer/timer for Yoshi's tounge. Writing a non-zero value to it makes Yoshi's tounge appear. The highest used value is 06 - this is when Yoshi is about to pull his tongue out.
+7E18AF 1 22 Yoshi
+Yoshi squatting timer.
+7E18B0 2 81 Yoshi
+Yoshi's Current X position. Used to determine where Yoshi is when eating a berry.
+7E18B2 2 81 Yoshi
+Yoshi's Current Y Position. Used to determine where Yoshi is when eating a berry.
+7E18B4 1 70 Empty
+Empty. Cleared during reset, titlescreen load, OW load and level load.
+7E18B6 1 243 Sprites
+Sometimes used to keep track of a tile to generate at $00BEB0 (before storing to $9C); may be in conjunction with $185E. Also used to determine X position of Mario when he's on the line guided rope, used when Mario is on top of Boo Block, etc.
+7E18B7 1 70 Empty
+Empty. Cleared during reset, titlescreen load, OW load and level load.
+7E18B8 1 43 Flag
+If clear, cluster sprite code does not run.
+7E18B9 1 133 Sprites
+Shooter type of sprite. 00 - Eerie Generator, 01 = Para Goomba and so on. The pointer for this address is located at $02/B00C (SNES).
+7E18BA 1 131 Sprites
+Determines amount of Boo rings per screen. Depending on bit 0 of this byte, the reappearing ghosts use position combination 1 or 2.
+7E18BB 1 70 Empty
+Empty. Cleared during reset, titlescreen load, OW load and level load.
+7E18BC 1 121 Sprites
+Floating skulls activation flag. Is set to 0x0C when Mario touches the sprite, and is reset in the sprite's INIT routine.
+7E18BD 1 69 Player
+Time to stun mario. Mario will face the screen and be unable to move.
+7E18BE 1 60 Player
+Related to Mario climbing. If > #$01, climbs if pressing up.
+7E18BF 1 129 Counter
+Timer used by a bunch of appearing/disappearing sprites (examples: Lakitu, Magikoopa, and Layer 3 smasher). Sprite D2 freezes it.
+7E18C0 1 156 Counter
+Timer for respawning certain sprites, such as the Boo Buddies of sprite E5 (and Lakitu). Sprite D2, Turn Off Generator 2, sets this to 00 when it is active.
+7E18C1 1 73 Sprites
+Used by Magikoopa and Lakitu to determine which sprite number to respawn.
+7E18C2 1 96 Player
+Mario is standing normal flag. Set above #$01 and his image stays at normal, but can still move.
+7E18C3 2 63 Sprites
+Y position of the respawning sprite, used with $18C0 and $18C1.
+7E18CD 1 46 Sprites
+Used as (alternative) index to bounce sprites.
+7E18CE 4 155 Timer
+Indicates how long each spinning turn block should still be spinning. When this timer is at 0, the spinning turn block turns back into a normal turn block.
+7E18D2 1 220 Player
+This address is increased every time mario kills a sprite with a star while the star is active and will reset when the star runs out. 
+00 = 200
+01 = 400
+02 = 800
+03 = 1000
+04 = 2000
+05 = 4000
+06 = 8000
+07 and above = 1up
+7E18D3 1 234 Timer
+Write a value to here, and sparkles (like the ones from the stars) will fly around Mario for that many frames. Never used in the original SMW.
+Note that if Mario has an invincibility star, this timer will wait until the star runs out.
+7E18D4 1 17 Yoshi
+Red berries eaten
+7E18D5 1 19 Yoshi
+Pink berries eaten.
+7E18D6 1 59 Yoshi
+Berry Type (0=Coin (no eggs), 1=Red, 2=Pink Berry, 3=Green)
+7E18D7 1 333 Sprites
+This is the high byte of the Map16 tile (actual tile number, not "acts like" setting) that a sprite is touching vertically.
+
+This is set after $019138, the subroutine that allows the sprite to interact with objects, is called. (This includes $01802A, the routine that updates the sprite's position with gravity, which calls $019138.)
+7E18D9 1 59 Misc.
+How far the castle door is open in the castle intro screen.
+7E18DA 1 78 Yoshi
+Sprite number that spawns when yoshi lays an egg. Is set to 78 normally (1up).
+7E18DB 1 165 Sprites
+Set to 08 at $00CDD4 (unreachable by default) and never touched again. Was probably intended as a starting index for the player's fireballs.
+
+Clears during fadeouts.
+7E18DC 1 271 Yoshi
+Flag that is set when Yoshi gets his tongue out while ducking. Yoshi cannot turn around in this state. If you were to use the debug codes at $00D085-$00D089 (x5285 - x5289), this also makes the fireballs that the player fires when on Yoshi appear at a different position.
+7E18DD 1 33 Counter
+Number of silver coins collected.
+7E18DE 1 24 Yoshi
+Yoshi laying eggs timer.
+7E18E2 1 64 Yoshi
+Lose Yoshi Flag (if set, any Yoshis spawned become 1ups instead)
+7E18E3 1 159 Sprites
+How many of the coins from the coin game cloud (the one that appears if Yoshi eats two pink berries) are collected. Oddly enough, it's cleared if you get hurt.
+7E18E4 1 100 Misc.
+1up Handler Address: Write a number to give that many lives. Handles everything except '1up' sprite.
+7E18E5 1 34 Timer
+Timer for the 1up handler ($18E4).
+7E18E7 1 94 Yoshi
+Yoshi ground stomp flag. (This is set to #$01 for a Yellow Yoshi or Yoshi with a yellow shell)
+7E18E8 1 94 Yoshi
+Yoshi growing animation timer. Additionally, it freezes everything on the screen except Yoshi.
+7E18E9 1 174 Sprites
+Occasionally used to index $17C0 (smoke image table). If there are no empty slots left when a smoke image should be spawned, the oldest one is removed and the index is reset.
+7E18EA 12 41 Sprites
+Minor Extended Sprite's X position, high.
+7E18F7 1 22 Sprites
+Sprite index to $16E1.
+7E18F8 4 87 Sprites
+Time for a bounce sprite to interact with a normal sprite. Starts at 06 and decrements.
+7E18FC 1 159 Sprites
+Extended sprite index. Holds the first available extended sprite index and resets to 07 if all of them have been filled and another extended sprite is spawned.
+7E18FD 1 39 Sprites
+Flag set when Whistlin' Chuck whistles.
+7E18FE 1 153 Sprites
+The diagonal and surrounded bullet bills timer. It increments every frame, and when it reaches A0, it sends out some more bullet bills and resets itself.
+7E18FF 1 62 Sprites
+Shooter index for the current shooter that is being processed.
+7E1900 1 49 Counter
+Star Points Gained at level end (decrements to 0)
+7E1901 4 51 Sprites
+YXPPCCCT data of bounce sprite that is being shown.
+7E1905 1 129 Counter
+Iggy's Platform holds the total number of tilts made counter. It will increment everytime the platform will be at a maximum tilt.
+7E1906 1 166 Counter
+Iggy's platform stationary phase counter. It will stop rotating the platform when you set it to anything higher than $01, and will stay so until it decrements to $00.
+7E1907 1 77 Counter
+Iggy's platform rotation phase counter. Resets when it is about to reach $06.
+7E1908 1 70 Empty
+Empty. Cleared during reset, titlescreen load, OW load and level load.
+7E1909 1 139 Flag
+Flag that makes the creating/eating block run or not run. FF = don't run, any other value (00) = run. Is set when a brown block is touched.
+7E190A 1 274 Sprites
+Reappearing Boo frame counter. They start appearing at FF, become fully opaque at DF, start disappearing at 3F, and become fully invisible at 1F. The counter decrements every frame and doesn't stop when it hits 00 unless sprite D2 is active, which causes it to freeze at FF.
+7E190B 1 61 Sprites
+Big Boo Boss palette index, used for the transparency effect.
+7E190C 1 23 Timer
+Directional coin timer.
+7E190E 1 313 Sprites
+Sprite buoyancy settings from level header. Format: XY00 0000 (bits)
+X = Enable sprite buoyancy, but reduces the number of sprites that can be on the screen at once without slowing down.
+Y = Enable sprite buoyancy, but disables all other sprite interaction with layer 2 to reduce the processing cost and slowdown.
+7E190F 12 336 Sprites
+Sprite properties, sixth Tweaker/MWR byte.
+Format: wcdj5sDp
+w=Don't get stuck in walls (carryable sprites)
+c=Don't turn into a coin with silver POW
+d=Death frame 2 tiles high
+j=Can be jumped on with upward Y speed
+5=Takes 5 firebals to kill
+s=Can't be killed by sliding
+D=Don't erase when goal passed
+p=Make platform passable from below
+7E191B 1 124 Sprites
+Cleared to zero at $01EBD9 and never touched again. It was probably intended for use with Yoshi but was never actually used.
+7E191C 1 73 Yoshi
+Indicates whether or not Yoshi has a key in his mouth. 00 = no, 01 = yes.
+7E191D 1 96 Sprites
+Used as an index for the cluster sprites that make up Sumo Brother flames. Unused in most cases.
+7E191E 1 194 Misc.
+Is set to a value 00-03 when pressing a big switch. Depending on the value, either green, yellow, blue or red switch sprites will be left behind. (But changing it has no effect other than that.)
+7E191F 1 45 Empty
+Empty. Cleared on reset and titlescreen load.
+7E1920 1 147 Sprites
+How many 1UPs from the bonus game are still not collected. This ends the bonus game when this RAM address is $00, after you hit the spinning thing.
+7E1925 1 31 Misc.
+Level Mode settings from header
+7E1928 1 313 Misc.
+One of two screen numbers used in the level loading routine. This one points to where the current object is placed and is never changed inside an object loading code. The other screen number is $1BA1.
+
+Is also used in the credits as a pointer to which background should be used for which part of the credits roll.
+7E192A 1 190 Misc.
+Level header RAM address. Format: swaaaaaa. s = slippery level, w = water level, a = Mario action. If one of bits 3-5 are set, Mario action will be Vertical Pipe exit downwards, water level.
+7E192B 1 27 Sprites
+Which Sprite GFX set to use
+7E192D 1 31 Misc.
+FG Palette settings from header
+7E192E 1 35 Misc.
+Sprite Palette settings from header
+7E192F 1 30 Misc.
+BG Colour settings from header
+7E1930 1 29 Misc.
+BG Colour setting from header
+7E1931 1 55 Misc.
+Tileset (but also used for some other random stuff...?)
+7E1932 1 13 Misc.
+Tileset again
+7E1933 1 108 Misc.
+Layer being processed (0=layer 1, 1=layer 2; used in both level loading routine and processing interactions)
+7E1938 128 318 Sprites
+Sprite Load Status Table.
+Loaded sprites' indices to this table are stored in the sprite table at $7E:161A
+All sprites are set to #$00 when the player enters a new area, meaning they are marked to be loaded.
+If a sprite's value is set to anything else, it will not reload until the player exits and re-enters the area.
+7E19B8 32 594 Misc.
+Exit Table. This connects doors and exit-enabled pipes to their correct entrances.
+
+The index for this exit table is the position of the exit (relative to layer 1) divided by 256. If layer 1 is vertical, then use the Y position of the exit, else use the X position. This is also known as the current screen number.
+
+For primary exits, the value in this exit table is the low 8 bits of the level number of the destination room. For secondary exits, the value in this exit table is the index to the secondary entrance ROM tables; and ROM table $05:F800 provides the low 8 bits of the room number.
+7E19D8 32 297 Misc.
+Exit Table, flags + high bit.
+Bit 0 = High bit of level # (1=level 1xx, 0=level 0xx)
+Bit 1 = Is Secondary Exit Flag
+Bit 2 = Is Exit Present Flag (set if any exit is on this screen)
+Bit 3 = Make Destination Water Flag (Secondary Exit only)
+Bits 4-7 = Unused
+
+Only used when LM is done with the ROM.
+7E19F8 384 236 Misc.
+Three tables (128 bytes each) for remembering which items has been taken (item memory settings). 16 bits for each subscreen (X position is used to determine which of those bits is used). Note that item memory 3 propably won't work well!
+7E1B80 1 115 Overworld
+If 0, the player is walking with a regular speed. If 1, the player is walking with climbing speed. 2-FF are unused.
+7E1B86 1 65 Misc.
+Determines which pointer to use for the routine that runs events.
+7E1B87 1 379 Misc.
+Seems to be the overworld "continue/quit" image trigger, for when you get a game over and then go to the overworld. The values trigger as follows, although they all are glitchy:
+00-04: (Nothing)
+05 (play sound and get rid of mario
+06 (display words, no functions
+07 (Display select thing, which doesn't function 
+08 (open box again and again
+09 open box do not repeat, disappears
+7E1B88 1 48 Misc.
+Message box expanding (0) or shrinking (1) flag.
+7E1B89 1 124 Misc.
+Message box expansion and shrinking timer/size. Note: Setting expanding timer above #$04 will cause the message to be blank.
+7E1B91 1 62 Misc.
+Blinking cursor frame counter (file select, save prompt, etc.)
+7E1B92 1 38 Misc.
+Blinking cursor position (value 00-03)
+7E1B93 1 71 Misc.
+Use Secondary Exits flag (likely not used when LM is done with the ROM)
+7E1B94 1 127 Flag
+Disable bonus game sprite from being loaded flag. If not zero, the bonus game sprite will terminate itself in the init routine.
+7E1B95 1 156 Flag
+When this flag is set, you will go to the special yoshi levels (C8, or 1C8) at the soonest possible loading time. Does not necessarily mean yoshi has wings.
+7E1B96 1 22 Misc.
+Side Exit Enabled flag
+7E1B99 1 93 Flag
+Used in goal point marching: flag to show peace image flag and handling the fade-out ellipse.
+7E1B9A 1 65 Misc.
+Level::BG Scroll Activated Flag. Setting it to #$08 activates it.
+7E1B9B 1 389 Flag
+Used to check if Yoshi should not reappear for the next room (castle intro cutscene and the likes). These cutscenes set the flag to #$01, which makes Yoshi not reappear for the next room, but it does keep Yoshi on the overworld. Automatically set to #$00 when the overworld is loaded again. One could use this RAM address to disable Yoshi for one room, but re-enable him in the next again.
+7E1B9D 1 43 Misc.
+Time to wait after rising/lowering the tide
+7E1B9F 1 53 Counter
+Timer used for breaking the bridge in Reznor battles.
+7E1BA0 1 151 Overworld
+OW- Triggers shaking the ground. Any value will shake it, FE = valley of bowser entrance fanfare and rumble. never stops until value is set back to 00.
+7E1BA1 1 200 Misc.
+One of two screen numbers used in the level loading routine. This one points to where the next tile will be placed and is often changed inside an object loading code. The other screen number is $1928.
+7E1BE3 1 102 Misc.
+Layer 3 settings
+00 - No Layer 3
+01 - Low and high tide
+02 - Low tide only
+03 - Tileset specific image
+7E1BE4 2 61 Blocks
+VRAM address to start uploading data from 7E1BE6. Big endian.
+7E1BE6 256 380 Blocks
+Which tiles should be used for each row of 16x16 tiles, 2 bytes per 8x8 tile, used while updating the screen (loading new tiles). In horizontal levels, $1BE6-$1C65 forms the left column of 8x8 tiles while $1C66 forms the right column of 8x8 tiles. On the OW and in vertical levels, $1BE6-$1C65 forms the upper row of 8x8 tiles, while $1C66-$1CE5 forms the bottom row of 8x8 tiles.
+7E1CE6 2 61 Blocks
+VRAM address to start uploading data from 7E1CE8. Big endian.
+7E1CE8 256 32 Blocks
+Same as 7E1BE6, but for layer 2.
+7E1DE9 1 59 Misc.
+Overworld::Ending enemy presentation screen (Count to 0x0C)
+7E1DEA 1 46 Overworld
+Overworld event to run at level end ($FF=None)
+7E1DEB 2 136 Overworld
+Event tile to load to the overworld. A starting value is set to this at level end, and it increases until it reaches the value of $1DED.
+7E1DED 2 80 Overworld
+Last event tile to load to the overworld during a given event, set at level end.
+7E1DF0 2 297 Overworld
+7E1DF0 - X position of the camera when using the "survey OW w/ select" function, low byte
+7E1DF1 - X position of the camera, when using survey function, high byte
+(These values are only used to determine which way the camera should go to get back to mario- there is another set for usual movement)
+7E1DF2 2 241 Overworld
+Ypos of the camera when using the "scroll around OW" function.
+7E1DF2 = low byte
+7E1DF3 = high byte
+Note: This is only used when determining how to get back to mario. There must be a different set for when simply scrolling around the screen.
+7E1DF4 1 43 Misc.
+Index to intro control sequence data table.
+7E1DF5 1 158 Timer
+Frame counter to use the same controller bits for intro sequence. Is also used as timer to determine how long the Nintendo Presents screen will remain active.
+7E1DF6 1 148 Overworld
+StarRoad and Tunnel handler (Map). Controls where you warp to. The values load by adding +2 to the previous one. This is starting from 00 and so on.
+7E1DF7 1 180 Player
+Used by the Star Road Warp Star on the overworld. It is the speed of Mario getting launched in the air during warping. The higher the value, the faster he gets launched in the air.
+7E1DF8 1 150 Player
+Used by the Star Road Warp Star on the overworld. It is how long Mario stays on the ground before he gets launched in the air, during warping. (Timer)
+7E1DF9 4 49 I/O
+SPC700 I/O Ports (Write values to play music/SFX)
+7E1DFD 2 60 Empty
+Empty. Cleared during reset, titlescreen, OW and level load.
+7E1DFF 1 103 I/O
+Seems like it is the copy of $7E1DFB, the music register. Writing to it doesn't give any effect though.
+7E1E00 1 60 Empty
+Empty. Cleared during reset, titlescreen, OW and level load.
+7E1E01 1 224 Misc.
+If debug code at $00CC86 is enabled, this RAM address allows you to be in free roaming mode: Mario can move in any direction, without being affected by objects or sprites. 00 = none, 01 = dash immediately, 02 = free roaming.
+7E1E02 20 34 Sprites
+Y low position of cluster sprites.
+7E1E16 20 34 Sprites
+X low position of cluster sprites.
+7E1E2A 20 35 Sprites
+Y high position of cluster sprites.
+7E1E3E 20 35 Sprites
+X high position of cluster sprites.
+7E1E52 20 136 Sprites
+Y position of reappearing Boos, frame 1. Not relative to screen border. Also used as Y speed for Boos from ghost ceiling and death bats.
+7E1E66 20 136 Sprites
+X position of reappearing Boos, frame 1. Not relative to screen border. Also used as X speed for Boos from ghost ceiling and death bats.
+7E1E7A 20 138 Sprites
+Y position of reappearing Boos, frame 2. Not relative to screen border. Also used as accumulating fraction bits for Y speed of death bats.
+7E1E8E 20 71 Sprites
+X position of reappearing Boos, frame 2. Not relative to screen border.
+7E1EA2 96 339 Overworld
+OW Level Setting Flags, location corresponds to $7E13BF. Bits:
+01: Enable walking right
+02: Enable walking left
+04: Enable walking down
+08: Enable walking up
+10: Save Prompt when level beaten
+20: No entry if level passed
+40: Midway point
+80: Beaten
+
+Setting $7E:1EEB to hex value $83 will enable the special stage features in ORIGINAL SMW.
+7E1F02 15 21 Overworld
+Overworld event flags
+7E1F11 1 97 Overworld
+Current submap for Mario (0=Overworld, 1=Yoshi, 2=Vanilla, 3=Forest, 4=Bowser, 5=Special, 6=Star)
+7E1F12 1 97 Overworld
+Current submap for Luigi (0=Overworld, 1=Yoshi, 2=Vanilla, 3=Forest, 4=Bowser, 5=Special, 6=Star)
+7E1F13 4 596 Player
+Mario's and Luigi's animation on the overworld.
+
+$00 = Look away from screen
+$02 = Face the screen
+$04 = Look to the left
+$06 = Walk to the right
+$08 = Look away from screen in the water
+$0A = Face the screen in the water
+$0C = Walk to the left in the water
+$0E = Walk to the right in the water
+$10 = Stick your hand out (entering level)
+$12 = Stick your hand out in the water (entering level)
+$14 = Climb ladder/vine?
+$16 = Climb ladder/vine
+
+Bytes 1-2 form Mario's image and bytes 3-4 form Luigi's image. Note that the high bytes of the two (bytes 2 and 4, $1F14 and $1F16) are actually unused.
+7E1F17 2 22 Player
+OW X position of Mario
+7E1F19 2 22 Player
+OW Y position of Mario
+7E1F1B 2 22 Player
+OW X position of Luigi
+7E1F1D 2 22 Player
+OW Y position of Luigi
+7E1F1F 2 71 Player
+Pointer to Mario's OW Xpos. Value is Mario's OW Xpos divided by 10 hex.
+7E1F21 2 71 Player
+Pointer to Mario's OW Ypos. Value is Mario's OW Ypos divided by 10 hex.
+7E1F23 2 73 Player
+Luigi's X position in the world map (OW Xpos) divided by 16 (by $10 hex).
+7E1F25 2 211 Player
+Luigi's Y position in the world map (OW Ypos) divided by 16 (by $10 hex).
+
+All four values from $1F1F, $1F21, $1F23 and $1F25 are always in range from 0 to 31. Thus you may access them as 8-bit or 16-bit values.
+7E1F27 4 45 Flag
+Switch block flags (Green, Yellow, Blue, Red)
+7E1F2B 3 83 Empty
+Cleared at reset, titlescreen load and file load (1/2 Player -> OW / intro screen).
+7E1F2E 1 67 Counter
+Number of events triggered. Can be used as a levels beaten counter.
+7E1F2F 12 415 Flag
+"Collected five or more Yoshi Coins" flags. Each byte represents the values for 8 levels, with each bit acting as a flag for a given level.
+
+Level # ($13BF) DIVIDED by 8 (LSR x3) provides the BYTE index into this table, since 8 levels are represented by a single byte. The level # MODULO 8 (AND #$07) is the BIT index into this table. It will choose a single bit out of the byte and this is the flag for this level.
+7E1F3B 1 49 Empty
+Empty. Cleared during reset and titlescreen load.
+7E1F3C 12 408 Flag
+RAM table handling in which levels the invisible 1up spawning tiles are flagged as 'do not respawn'. This happens after they're collected in that level. 8 levels go in 1 byte ; one bit per level. Order of levels is the same as RAM address $13BF, but then in bits, to compress the amount of space needed. If the bit relative to the level is flagged, the tiles will not respawn. If it's clear, it will respawn.
+7E1F48 1 49 Empty
+Empty. Cleared during reset and titlescreen load.
+7E1F49 141 63 Overworld
+Buffer for $1EA2-$1F2E. SRAM transfer goes through this buffer.
+7E1FD6 12 70 Sprites
+Unused sprite table, cleared at individual sprite load. (1 slot each.)
+7E1FE2 12 99 Sprites
+Time to disable sprite's contact with cape. This table already decrements by itself once per frame.
+7E1FEE 12 388 Flag
+RAM table handling in which levels the 3UP moons are flagged as 'do not respawn'. This happens after they're collected in that level. 8 levels go in 1 byte ; one bit per level. Order of levels is the same as RAM address $13BF, but then in bits, to compress the amount of space needed. If the bit relative to the level is flagged, the moon will not respawn. If it's clear, it will respawn.
+7E1FFA 1 49 Empty
+Empty. Cleared during reset and titlescreen load.
+7E1FFB 1 131 Palettes
+Lightning Flash Color. Most values are just shades of white, but 70+ is actual colors. Only active while lightning flash is active.
+7E1FFC 1 112 Timer
+Lightning Flash Timer. 00- no time, 01- constant, and so on. Only active while lightning flash effect is active.
+7E1FFD 1 150 Timer
+Lightning Flash "Step." 00- step 8, 01, step 7, and so on. Repeats steps 0-8 all the way up to FF. Only active while lightning flash effect is active.
+7E1FFE 1 99 Flag
+If flag is set, the credit cutscene backgrounds will get updated every frame. If clear, they won't.
+7E1FFF 1 49 Empty
+Empty. Cleared during reset and titlescreen load.
+7E2000 23 19 Graphics
+GFX32 decompressed.
+7E7D00 12 19 Graphics
+GFX33 decompressed.
+7EAD00 3 200 Graphics
+GFX file decompression buffer. Decompressed as 3bpp (3kb) for unexpanded GFX and as 4bpp for expanded.
+Also used for LM's extra animated tile space.
+$7EB900 is also used as additional buffer kilobyte.
+7EB900 1 22 Blocks
+BG2 tilemap, low byte.
+7EBD00 1 95 Blocks
+BG2 tilemap, high byte. The first seven bytes are used by custom block ASM/ExAnimated Tile GFX.
+7EC100 1 100 Empty
+Empty on an unhacked ROM, potentially occupied with extended animated tile graphics in a hacked ROM.
+7EC680 96 58 Sprites
+Tilemap of Mode 7 bosses (Ludwig, Roy, Morton and Bowser).
+7EC6E0 288 100 Empty
+Empty on an unhacked ROM, potentially occupied with extended animated tile graphics in a hacked ROM.
+7EC800 14 708 Blocks
+Map16 Low Byte Table ($7EFE00-$7EFFFF are unused in horizontal levels, but used in vertical ones). In the overworld, $7ED000-$7ED3FF is used as a table that contains translevel numbers for the big world map (the one with Donut Plains and Chocolate Island). If you divide the map into 16x16 blocks, then this table connects each block to a level. To interpret the value, see RAM $7E:13BF.
+To index this table, use RAM $7E:1F1F and $7E:1F21 to find Mario, or use RAM $7E:1F23 and RAM $7E:1F25 to find Luigi.
+X position / 16: %0000 0000 000X xxxx
+Y position / 16: %0000 0000 000Y yyyy
+index to this table: %0000 00YX yyyy xxxx.
+$7ED400-$7ED7FF is used for the submaps as a whole and has the same kind of format.
+7F0000 3 142 Overworld
+Layer 2 event tilemap of the overworld.
+$7F0B44-$7F1343 are also used as buffer for dynamic sprite graphics (they get uploaded during vblank).
+7F0D00 13 99 Empty
+Empty, untouched RAM on a vanilla ROM. Used to hold expanded layer 2 event tilemap on a hacked ROM.
+7F4000 16 355 Overworld
+The Layer 2 tilemap of the whole overworld (including submaps, starting at $7F:6000). It does NOT affect the event tiles. The tiles are also 8x8. The tilemap starts from the top left corner of the main overworld. Format is as following:
+[Tile number], [Tile properties]
+Part of this table is also used for a RAM buffer for the credit cutscene backgrounds.
+7F8000 387 82 Sprites
+Unrolled loop which writes to OAM to set all sprite tiles off screen on each frame
+7F8183 504 71 Empty
+Empty, untouched RAM.
+~420 bytes used in LM 1.70+ for VRAM modification
+7F837B 2 40 Misc.
+Used for indexing the stripe image table
+7F837D 5 125 Misc.
+VRAM upload table (In stripe image). Not all of it is used during normal gameplay, so $7F8600+ shouldn't be dangerous to use.
+7F977B 768 69 Misc.
+Mario Start, Game Over, Time Up etc. messages Graphics, decompressed.
+7F9A7B 512 31 Sprites
+Position of Wiggler's segments.
+7F9C7B 11 1072 Empty
+Empty, untouched RAM on a clean ROM.
+In a hacked ROM:
+$7FAB10 (12 bytes) is used by Sprite Tool to check a number of things.
+Bit 2 indicates if the first extra bit is set.
+Bit 3 indicates if it's a custom sprite.
+Bit 7 indicates if it has been initialized.
+$7FAB1C (12 bytes) is used by Sprite Tool to indicate whether the sprite being processed uses custom code, maybe for other things?
+$7FAB28 (12 bytes) is used by Sprite Tool to indicate the extra property byte 1 from the cfg file
+$7FAB34 (12 bytes) is used by Sprite Tool to indicate the extra property byte 2 from the cfg file
+$7FAB9E (12 bytes) is used by Sprite Tool to indicate the custom sprite number
+
+$7FBC00-$7FC7FF area:
+Empty on an unhacked ROM, used incrementally for Lunar Magic hacks. More space will be used here as more hacks are changed or added to Lunar Magic.
+
+In version 1.6x:
+$7FC000 : $00A bytes, Misc
+
+In version 1.70+:
+$7FBC00 : $400 bytes, BG data used by VRAM modification
+$7FC000 : $1A bytes, Misc
+$7FC070 : $8E bytes, new ExAnimation
+$7FC300 : $400 bytes, BG data used by VRAM modification
+7FC800 14 439 Blocks
+Map16 High Byte Table in a clean ROM ($7FFE00-$7FFFFF are unused in horizontal levels, but used in vertical ones).
+In a hacked ROM, the following are also placed here:
+$7FFF00 (32 bytes) is used for LevelNames 2.0 by Ice Man
+$7FFFDF (10 bytes) is used by BMF's LevelNames code
+$7FFFF0 (10 bytes) is used by FuSoYa's SMB3 Pipe Code.
+$7FFFF0 (4 bytes) is used by BMF's LevelASM code
+$7FFFF8 (8 bytes) is used by LM demo recording/playing ASM
