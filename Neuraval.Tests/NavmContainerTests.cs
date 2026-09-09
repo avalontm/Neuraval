@@ -179,7 +179,7 @@ namespace Neuraval.Tests
         [Fact]
         public void InputCount_MatchesExpected()
         {
-            Assert.Equal(326, MarioStateEncoder.InputCount);
+            Assert.Equal(1324, MarioStateEncoder.InputCount);
         }
 
         [Fact]
@@ -201,7 +201,10 @@ namespace Neuraval.Tests
             Assert.Equal(MarioStateEncoder.CheckpointBlockStart + MarioStateEncoder.CheckpointSignalCount, MarioStateEncoder.WallBlockStart);
             Assert.Equal(MarioStateEncoder.WallBlockStart + MarioStateEncoder.WallSignalCount, MarioStateEncoder.VerticalLevelBlockStart);
             Assert.Equal(MarioStateEncoder.VerticalLevelBlockStart + MarioStateEncoder.VerticalLevelSignalCount, MarioStateEncoder.PipeBlockStart);
-            Assert.Equal(MarioStateEncoder.PipeBlockStart + MarioStateEncoder.PipeSignalCount, MarioStateEncoder.InputCount);
+            Assert.Equal(MarioStateEncoder.PipeBlockStart + MarioStateEncoder.PipeSignalCount, MarioStateEncoder.LevelBlockStart);
+            Assert.Equal(MarioStateEncoder.LevelBlockStart + MarioStateEncoder.LevelSignalCount, MarioStateEncoder.HazardBlockStart);
+            Assert.Equal(MarioStateEncoder.HazardBlockStart + MarioStateEncoder.HazardSignalCount, MarioStateEncoder.TileCategoryBlockStart);
+            Assert.Equal(MarioStateEncoder.TileCategoryBlockStart + MarioStateEncoder.TileCategoryBlockSignalCount, MarioStateEncoder.InputCount);
         }
 
         [Fact]
@@ -295,7 +298,7 @@ namespace Neuraval.Tests
 
             var vl = MarioStateEncoder.VerticalLevelBlockStart;
             Assert.Equal(1f, input[vl + 0]);
-            Assert.Equal(MarioStateEncoder.VerticalLevelBlockStart + MarioStateEncoder.VerticalLevelSignalCount, input.Length);
+            Assert.Equal(MarioStateEncoder.InputCount, input.Length);
         }
 
         [Fact]
@@ -320,7 +323,7 @@ namespace Neuraval.Tests
             Assert.Equal(1f / MarioStateEncoder.CoinCountScale, input[pp + 0], 6);
             Assert.Equal(32f / MarioStateEncoder.SpriteOffsetScale, input[pp + 1], 6);
             Assert.Equal(-16f / MarioStateEncoder.SpriteOffsetScale, input[pp + 2], 6);
-            Assert.Equal(MarioStateEncoder.PipeBlockStart + MarioStateEncoder.PipeSignalCount, input.Length);
+            Assert.Equal(MarioStateEncoder.InputCount, input.Length);
         }
 
         [Fact]
@@ -645,7 +648,7 @@ namespace Neuraval.Tests
             Assert.Equal(-8, state.MarioVelocityY);
             Assert.True(state.IsGrounded);
             Assert.Equal(4, state.Lives);
-            Assert.Equal(169, state.Tiles.Count);
+            Assert.Equal(SnesState.GridSize * SnesState.GridSize, state.Tiles.Count);
             Assert.Equal(0x2B, state.Tiles[0]);
             Assert.Single(state.Sprites);
 

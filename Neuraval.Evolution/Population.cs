@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace Neuraval.Evolution
 {
@@ -40,6 +41,34 @@ namespace Neuraval.Evolution
                 var environment = _environmentFactory();
                 scores[i] = _fitnessEvaluator.Evaluate(Agents[i], environment);
             }
+
+            LastFitnessScores = scores;
+            return scores;
+        }
+
+        public IReadOnlyList<float> EvaluateGenerationParallel(Func<int, IEnvironment<TState, TAction>> workerEnvironmentFactory, int workerCount)
+        {
+            var scores = new float[Agents.Count];
+
+            var splits = new Dictionary<int, List<int>>();
+            for (var w = 0; w < workerCount; w++)
+            {
+                splits[w] = new List<int>();
+            }
+
+            for (var i = 0; i < Agents.Count; i++)
+            {
+                splits[i % workerCount].Add(i);
+            }
+
+            Parallel.ForEach(splits, slot =>
+            {
+                var environment = workerEnvironmentFactory(slot.Key);
+                foreach (var index in slot.Value)
+                {
+                    scores[index] = _fitnessEvaluator.Evaluate(Agents[index], environment);
+                }
+            });
 
             LastFitnessScores = scores;
             return scores;

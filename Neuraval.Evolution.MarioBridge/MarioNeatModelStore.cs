@@ -23,26 +23,43 @@ namespace Neuraval.Evolution.MarioBridge
 
         public static void Save(string filePath, NeatGenome genome)
         {
-            var header = new MarioNeatModelHeader
+            try
             {
-                FormatVersion = CurrentFormatVersion,
-                InputCount = genome.InputCount,
-                OutputCount = genome.OutputCount,
-                SavedAtUtc = DateTime.UtcNow
-            };
-
-            byte[] body;
-            using (var bodyStream = new MemoryStream())
-            {
-                using (var writer = new BinaryWriter(bodyStream))
+                var header = new MarioNeatModelHeader
                 {
-                    MarioGenomeSerializer.Write(writer, genome);
+                    FormatVersion = CurrentFormatVersion,
+                    InputCount = genome.InputCount,
+                    OutputCount = genome.OutputCount,
+                    SavedAtUtc = DateTime.UtcNow
+                };
+
+                byte[] body;
+                using (var bodyStream = new MemoryStream())
+                {
+                    using (var writer = new BinaryWriter(bodyStream))
+                    {
+                        MarioGenomeSerializer.Write(writer, genome);
+                    }
+
+                    body = bodyStream.ToArray();
                 }
 
-                body = bodyStream.ToArray();
-            }
+                var headerJson = JsonSerializer.Serialize(header, HeaderJsonOptions);
 
-            NavmBinarySerializer.Save(filePath, JsonSerializer.Serialize(header, HeaderJsonOptions), body);
+                TransientFileIoRetry.Run(
+                    () => NavmBinarySerializer.Save(filePath, headerJson, body),
+                    onRetry: (attempt, maxRetries, ex) => Console.WriteLine(
+                        $"Modelo ({filePath}): el archivo esta en uso por otro proceso ({ex.Message}); reintentando ({attempt}/{maxRetries})..."));
+            }
+            catch (Exception ex)
+            {
+                // No dejamos que un fallo al guardar el "mejor modelo" tire
+                // abajo el entrenamiento: el checkpoint principal (que SI
+                // tiene reintentos y ya guardo bien) sigue teniendo el mismo
+                // genoma, y en el proximo generation se vuelve a intentar
+                // guardar este archivo.
+                Console.WriteLine($"No se pudo guardar el modelo ({filePath}): {ex.GetType().Name}: {ex.Message}");
+            }
         }
 
         public static NeatGenome? Load(string filePath)

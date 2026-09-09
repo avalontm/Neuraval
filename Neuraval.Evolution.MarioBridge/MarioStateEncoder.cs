@@ -66,6 +66,11 @@ namespace Neuraval.Evolution.MarioBridge
         // puertas (ver SMW_RAM_Map_IA.md, seccion 38). [0] cuantas tuberias
         // hay cerca, [1]/[2] dx/dy de la mas cercana.
         public const int PipeSignalCount = 3;
+        public const int LevelSignalCount = 8;
+        public const int TileCategorySignalCount = 3;
+        public const int TileCategoryBlockSignalCount = GridCellCount * TileCategorySignalCount;
+        public const int HazardSignalCount = 3;
+        public const float HazardRankingDistanceFactor = 0.35f;
 
         public const int MarioBlockStart = GridCellCount;
         public const int CameraBlockStart = MarioBlockStart + MarioBlockSignalCount;
@@ -83,7 +88,16 @@ namespace Neuraval.Evolution.MarioBridge
         public const int WallBlockStart = CheckpointBlockStart + CheckpointSignalCount;
         public const int VerticalLevelBlockStart = WallBlockStart + WallSignalCount;
         public const int PipeBlockStart = VerticalLevelBlockStart + VerticalLevelSignalCount;
-        public const int InputCount = PipeBlockStart + PipeSignalCount;
+        public const int LevelBlockStart = PipeBlockStart + PipeSignalCount;
+        public const int HazardBlockStart = LevelBlockStart + LevelSignalCount;
+        public const int TileCategoryBlockStart = HazardBlockStart + HazardSignalCount;
+        public const int InputCount = TileCategoryBlockStart + TileCategoryBlockSignalCount;
+        public const int FrameHistory = 4;
+        public const int StackedInputCount = InputCount * FrameHistory;
+
+        public const int CoinTileLowByte = 0x2B;
+        public const int CoinBlockTileLowByteA = 0x1B;
+        public const int CoinBlockTileLowByteB = 0x23;
 
         public const float VelocityScale = 16f;
         public const float SpriteOffsetScale = 100f;
@@ -102,7 +116,12 @@ namespace Neuraval.Evolution.MarioBridge
 
         public static float[] Encode(SnesState state)
         {
-            var input = new float[InputCount];
+            return EncodeFrameVector(state);
+        }
+
+        public static float[] EncodeFrameVector(SnesState state, float[]? destination = null)
+        {
+            var input = destination ?? new float[InputCount];
 
             for (var i = 0; i < GridCellCount; i++)
             {
@@ -156,9 +175,9 @@ namespace Neuraval.Evolution.MarioBridge
 
             var p = PowerupBlockStart;
             var clampedPowerup = Math.Clamp(state.PowerupLevel, 0, MaxKnownPowerupLevel);
-            for (var level = 0; level < PowerupSignalCount; level++)
+            for (var powerupSlot = 0; powerupSlot < PowerupSignalCount; powerupSlot++)
             {
-                input[p + level] = level == clampedPowerup ? 1f : 0f;
+                input[p + powerupSlot] = powerupSlot == clampedPowerup ? 1f : 0f;
             }
 
             var nearestSprites = NearestSprites(state, TrackedSpriteCount);
@@ -268,6 +287,32 @@ namespace Neuraval.Evolution.MarioBridge
             input[pp + 1] = state.NearestPipeDx / SpriteOffsetScale;
             input[pp + 2] = state.NearestPipeDy / SpriteOffsetScale;
 
+            var level = state.LevelIndex % LevelSignalCount;
+            var lv = LevelBlockStart;
+            for (var slot = 0; slot < LevelSignalCount; slot++)
+            {
+                input[lv + slot] = slot == level ? 1f : 0f;
+            }
+
+            var hz = HazardBlockStart;
+            var (hazardCount, hazardDx, hazardDy) = NearestByType(state, MarioSpriteNames.IsHazardous);
+            input[hz + 0] = hazardCount / CoinCountScale;
+            input[hz + 1] = hazardDx / SpriteOffsetScale;
+            input[hz + 2] = hazardDy / SpriteOffsetScale;
+
+            var tc = TileCategoryBlockStart;
+            for (var i = 0; i < GridCellCount; i++)
+            {
+                var tile = state.Tiles[i];
+                var offset = tc + i * TileCategorySignalCount;
+                var isCoin = tile == CoinTileLowByte;
+                var isCoinBlock = tile == CoinBlockTileLowByteA || tile == CoinBlockTileLowByteB;
+                var isSolid = tile != 0 && !isCoin && !isCoinBlock;
+                input[offset + 0] = isSolid ? 1f : 0f;
+                input[offset + 1] = isCoin ? 1f : 0f;
+                input[offset + 2] = isCoinBlock ? 1f : 0f;
+            }
+
             return input;
         }
 
@@ -346,6 +391,10 @@ namespace Neuraval.Evolution.MarioBridge
                 {
                     var dx = (float)(sprite.X - state.MarioX);
                     var dy = (float)(sprite.Y - state.MarioY);
+                    var distanceSquared = dx * dx + dy * dy;
+                    var rankingDistanceSquared = MarioSpriteNames.IsHazardous(sprite.Type)
+                        ? distanceSquared * HazardRankingDistanceFactor * HazardRankingDistanceFactor
+                        : distanceSquared;
                     return new SpriteFeature(
                         dx,
                         dy,
@@ -366,7 +415,7 @@ namespace Neuraval.Evolution.MarioBridge
                         sprite.Eaten,
                         sprite.ObjectInteraction,
                         sprite.SpinTimer,
-                        dx * dx + dy * dy);
+                        rankingDistanceSquared);
                 })
                 .OrderBy(candidate => candidate.DistanceSquared)
                 .Take(count)

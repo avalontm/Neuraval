@@ -87,7 +87,7 @@ Neuraval/
 │       └── NavmBinarySerializer.cs
 │
 ├── Neuraval.Evolution.MarioBridge/ (SMW agent via BizHawk Lua bridge)
-│   ├── Program.cs (CLI: --reset / --checkpoint / --capture / --imitate / --seed-policy / --export-model / --population / --level)
+│   ├── Program.cs (CLI: --reset / --checkpoint / --capture / --imitate / --seed-policy / --export-model / --population / --level / --turbo)
 │   ├── MarioAgent.cs / MarioStateEncoder.cs / MarioAgentOutput.cs
 │   ├── MarioCheckpointStore.cs / MarioNeatModelStore.cs / MarioGenomeSerializer.cs
 │   ├── MarioDataset.cs / MarioPolicyNetwork.cs / MarioImitationTrainer.cs
@@ -154,6 +154,25 @@ Controls: `F1` toggles the debug overlay, `Esc` restarts once every dinosaur has
 
 `Neuraval.Evolution.MarioBridge` entrena agentes NEAT para super Mario World controlando BizHawk a través de un bridge Lua por TCP (`127.0.0.1:8766`). El agente percibe la RAM P0+P1 (tilemap, estado de Mario, cámara, sprites, moneda Yoshi más cercana, item sostenible/sostenido y checkpoint) codificada en un vector de **326 entradas** y actúa con **7 salidas** (Izquierda, Derecha, A, B, Y, Abajo, Arriba).
 
+### Configuración de savestates (paso obligatorio antes de correr cualquier modo)
+
+`mario_bridge.lua` **no trae ningún `.state` incluido** — son archivos binarios específicos de tu ROM/partida y no se versionan en el repo. Si no los creás vos mismo antes de arrancar, vas a ver `could not find file: ...` repetido sin parar en la consola de Lua, y el nivel nunca se resetea de verdad (queda trabado reintentando el load para siempre, aunque el socket con C# siga técnicamente conectado).
+
+Cómo configurarlo:
+
+1. **Creá el savestate**: abrí la ROM en BizHawk, jugá/avanzá hasta el punto exacto donde querés que arranque el "Nivel 0" (típicamente el inicio de Donut Plains 1), y guardalo como estado con BizHawk (`File > Save State > Save Named State...` o el atajo equivalente según tu versión). Nombralo `DP1.state`.
+2. **Dónde ponerlo**: por default (sin configurar nada), el script busca los savestates **en la misma carpeta donde está `mario_bridge.lua`** — normalmente `lua/` dentro del repo — detectando esa ruta automáticamente con `debug.getinfo`, sin depender de dónde se haya lanzado BizHawk.exe. Así que lo más simple es guardar `DP1.state` ahí mismo, junto al script.
+3. **Override opcional**: si preferís guardar los savestates en otro lado (por ejemplo, fuera del repo), definí la variable de entorno `NEURAVAL_SAVESTATE_DIR` apuntando a esa carpeta **antes de abrir BizHawk**, por ejemplo (PowerShell):
+   ```powershell
+   setx NEURAVAL_SAVESTATE_DIR "D:\otra-carpeta\savestates\"
+   ```
+   El script lee esta variable una sola vez al cargar, así que si la cambiás hay que reiniciar BizHawk (o al menos recargar el script) para que tome efecto. Si no la definís, se usa la carpeta del script.
+4. **Si usás varios niveles** (`--level "Nivel 0 (DP1.state)" --level "Nivel 1 (medio.state)"`, etc.), cada índice necesita su propio `.state` en esa misma carpeta **y** una entrada correspondiente en la tabla `SAVESTATE_FILES` al principio de `mario_bridge.lua` (hoy solo el índice `0` → `DP1.state` está mapeado ahí; agregá `[1] = SAVESTATE_DIR .. "medio.state"`, etc., a mano si sumás niveles).
+
+Si algún `.state` configurado no aparece en la carpeta esperada, el script lo detecta apenas carga y lo avisa **una sola vez** por consola con la ruta completa que va a intentar usar — no hace falta esperar a que falle un reset en medio de una partida para enterarte.
+
+
+
 El tilemap (13×13 alrededor de Mario) envía el **valor crudo del Map16** (0–255 normalizado a 0..1) en vez de binario, así la red distingue ladrillos, bloques `?`, monedas y suelo. Además hay bloques de señales de colección y navegación:
 - Monedas y bloques-moneda: nº cerca y offset del más cercano (monedas: tiles `$025/$02B/$05B/$06B`; bloques-moneda: `$11B/$123`).
 - **Bloques de diálogo** (Map16 completo `$0104-$0107`): nº cerca y offset, para que el modelo evite golpearlos y no se abra el mensaje.
@@ -174,9 +193,52 @@ Se escribe de forma atómica (fichero temporal + rename). El header JSON de cada
 
 ### Pipeline de Imitation Learning
 
+#### Modo simple: `--learn` (recomendado)
+
+Si lo que querés es "jugar yo un rato para enseñarle, y que después el modelo juegue solo con eso", no hace falta encadenar tres comandos a mano: `--learn` hace los tres pasos en **una sola conexión con BizHawk**, sin reconectar entre medio.
+
+```bash
+dotnet run --project Neuraval.Evolution.MarioBridge -- --learn
+```
+
+Cómo se usa:
+
+1. Arrancás el comando, abrís BizHawk con `mario_bridge.lua` como siempre y jugás **con el teclado**; cada frame se graba junto con tus botones (igual que `--capture`, guardando en `checkpoints/mario_dataset.navm`).
+2. Cuando ya jugaste lo suficiente (unos cuantos episodios, muriendo/completando el nivel varias veces), presionás **Ctrl+C una vez**. Ahí se corta la grabación, se entrena la política por imitación con lo grabado (igual que `--imitate`, guardando en `checkpoints/mario_policy.navm`) y, apenas termina, el modelo **arranca a jugar solo automáticamente** sobre la misma conexión (igual que `--play`) — no hace falta correr otro comando ni recargar BizHawk.
+3. Con el modelo ya jugando solo, presionás **Ctrl+C de nuevo** para detenerlo y cerrar el proceso.
+
+La única opción es cuántos epochs entrenar (default 20; no suele hacer falta tocarlo):
+
+```bash
+dotnet run --project Neuraval.Evolution.MarioBridge -- --learn --epochs 30
+```
+
+Si necesitás elegir otro nivel, otra ruta de salida, o turbo durante la fase de juego automático, usá los tres comandos manuales de abajo — `--learn` es a propósito el modo sin opciones, pensado para "jugar y que aprenda" sin tener que pensar en flags.
+
+#### Modo manual: `--capture` + `--imitate` + `--play`
+
 1. `--capture <dataset.navm>`: graba tus partidas desde BizHawk (estado + botones + recompensa por frame), cerrando episodio en muerte/nivel completado/reset manual. La recompensa por frame reproduce el shaping del entorno evolutivo: avance horizontal + monedas (×50) + power-up (ganancia ×200, pérdida −150).
 2. `--imitate <dataset.navm> [--epochs N] [--imitate-out policy.navm]`: entrena una política (MLP) por imitación con BCE. La pérdida de cada muestra se **pondera por su recompensa** (pesos 1–3 normalizados por min-max), de modo que el modelo imita con más fuerza las jugadas "buenas" (avanzar, recoger monedas/power-ups). Además hay split de **validación 90/10**, se restaura el epoch con mejor val-BCE y **early stopping** con paciencia 5 — el `--imitate-out` guarda siempre la política del mejor val-loss.
-3. `--seed-policy policy.navm`: siembra la población NEAT con la política imitada en el siguiente entrenamiento evolutivo.
+3. `--play [policy.navm] [--level "..."] [--turbo]`: **no entrena ni evoluciona nada** — carga la política ya entrenada por imitación y la deja jugar sola contra BizHawk en vivo, frame a frame, reseteando el nivel al morir/completarlo hasta que la cierres con Ctrl+C. Es el modo pensado para "el humano ya jugó y entrenó el modelo, ahora que juegue el modelo con lo aprendido". Sin ruta explícita usa `checkpoints/mario_policy.navm` (el default de `--imitate-out`).
+4. `--seed-policy policy.navm`: alternativa si en cambio querés seguir mejorando esa política por evolución NEAT — siembra la población con ella en el siguiente entrenamiento evolutivo, en vez de solo reproducirla.
+
+### Pipeline completo: imitación → NEAT → auto-mejora
+
+El flujo recomendado para no depender solo de imitación pura (que sufre *distribution shift*: un pequeño error saca a la política de la distribución de estados que vio en el dataset humano y los errores se acumulan) es encadenar los dos mundos:
+
+```bash
+# 1) Jugás vos un rato para que el modelo imite (o --capture + --imitate a mano)
+dotnet run --project Neuraval.Evolution.MarioBridge -- --learn
+
+# 2) Con checkpoints/mario_policy.navm ya guardado, arrancás NEAT sembrado con esa política
+#    en vez de una población random: el agente 0 arranca con el comportamiento imitado y
+#    el resto de la población es random, como siempre.
+dotnet run --project Neuraval.Evolution.MarioBridge -- --seed-policy checkpoints/mario_policy.navm
+```
+
+Internamente, `--seed-policy` convierte la red densa entrenada por backprop (`MarioPolicyNetwork`) a un genoma NEAT equivalente (`AsGenome`), copiando los pesos exactos como conexiones del genoma. Para que esa conversión preserve el comportamiento demostrado, el genoma tiene que **evaluarse** con la misma función de activación de salida que usó el entrenamiento (`Sigmoid`, no `Tanh` — así lo espera también el umbral de decisión de botones, `MarioAgentOutput.ButtonThreshold = 0.5f`); esto ya está garantizado por `NeatGenome.Evaluate`, que aplica `Tanh` solo en nodos ocultos y `Sigmoid` en los de salida.
+
+Una vez sembrada, la población sigue el ciclo evolutivo normal (mutación de pesos, `AddConnection`/`AddNode`, crossover por innovation number, especiación, fitness por avance/objetivos) sin ninguna diferencia respecto de arrancar sin semilla — la única diferencia es de dónde sale el genoma inicial del slot 0.
 
 ### Ejecución del entrenamiento evolutivo
 
@@ -193,11 +255,17 @@ dotnet run --project Neuraval.Evolution.MarioBridge -- --checkpoint mi_checkpoin
 # Exportar el mejor genoma a un modelo autocontenido
 dotnet run --project Neuraval.Evolution.MarioBridge -- --export-model checkpoints/mario_best.navm
 
-# Modo captura de dataset para Imitation Learning
+# Atajo: jugar vos para entrenar y despues que el modelo juegue solo, todo en un comando
+dotnet run --project Neuraval.Evolution.MarioBridge -- --learn
+
+# Modo captura de dataset para Imitation Learning (paso manual equivalente al 1er tramo de --learn)
 dotnet run --project Neuraval.Evolution.MarioBridge -- --capture checkpoints/mario_dataset.navm
 
 # Entrenar la política imitada
 dotnet run --project Neuraval.Evolution.MarioBridge -- --imitate checkpoints/mario_dataset.navm --epochs 20 --imitate-out checkpoints/mario_policy.navm
+
+# Ver jugar al modelo ya entrenado (sin entrenar ni evolucionar nada mas)
+dotnet run --project Neuraval.Evolution.MarioBridge -- --play checkpoints/mario_policy.navm
 ```
 
 Opciones de entrenamiento evolutivo:
@@ -206,14 +274,87 @@ Opciones de entrenamiento evolutivo:
 # Tamaño de población (default 16; poblaciones más grandes exploran mejor pero alargan cada generación)
 dotnet run --project Neuraval.Evolution.MarioBridge -- --population 20
 
-# Rotar entre varios niveles/savestates por generación (curriculum). Repite el flag por cada nivel,
-# el índice es el mismo que usa mario_bridge.lua para cargar los savestates.
+# Rotar entre varios niveles/savestates por generación (round-robin ciego, sin gating).
+# Repite el flag por cada nivel; el índice es el mismo que usa mario_bridge.lua para
+# cargar los savestates.
 dotnet run --project Neuraval.Evolution.MarioBridge -- --level "Nivel 0 (DP1.state)" --level "Nivel 1 (medio.state)" --level "Nivel 2 (final.state)"
+
+# Modo turbo: le pide a BizHawk que corra a la maxima velocidad soportada
+# (client.speedmode) apenas se conecta. Solo tiene efecto en entrenamiento;
+# no lo uses con --capture porque ahi jugas vos a mano en tiempo real.
+dotnet run --project Neuraval.Evolution.MarioBridge -- --turbo
 ```
 
 Sin `--level`, se usa el nivel por defecto. El elitismo por especie requiere `MinSpeciesSizeForElite = 3` y conserva `EliteCountPerSpecies = 2`; el mejor genoma histórico siempre re-siembra la población en el slot 0.
 
-El fitness por generación combina avance horizontal con bonificaciones (nivel completado, power-ups, monedas, monedas Yoshi con bonus por juntar las 5, checkpoint/punto medio) y penalizaciones (daño recibido, muerte). El `mario_bridge.lua` implementa el protocolo v12 (70 campos) con los comandos `RESET`, `CAPTURE` y `STOP`, incluyendo status/stun/flags/misc de sprites, off-screen full/eaten/interacción objeto/timer giro, cluster sprites, capas 2/3, segundo jugador, timers de POW/door/player, tilemap con valores crudos de Map16, senales de monedas/bloques-moneda, bloques de dialogo (Map16 completo `$0104-$0107`), acantilados (2 huecos: distancia+anchura), banderas de item sostenido/sostenible ($1470/$148F + status $14C8), checkpoint de punto medio ($13CE/$13CD), contador de monedas Yoshi ($1420), señales de pared/hueco vertical (distancia en tiles a la primera pared sólida hacia la derecha a la altura del cuerpo de Mario, y a la primera plataforma sólida arriba/abajo en la columna de Mario, escaneando hasta `GridRadius` tiles; 0 = nada detectado en rango), bandera de nivel vertical (`$7E:1412`, scroll vertical habilitado/condicional, colapsado a 0/1) y señal de tubería vertical transitable cercana (Map16 completo `$0137`/`$0138`, tiles superiores de tubería exit-enabled). Los datasets e checkpoints grabados con el protocolo v11 quedan obsoletos por el cambio de entradas (323→326) y deben recapturarse. Los datasets e checkpoints grabados con el protocolo v8 quedan obsoletos por el cambio de entradas (298→307) y salidas (6→7, se agrega Arriba) y deben recapturarse. El campo `Blocked` de Mario ($7E:0077, formato `SxxMUDLR`) y el de cada sprite cercano ($7E:1588, formato `xxxxUDLR`) ya no se pasan crudos/bitmask a la red: se decodifican en 4 señales binarias por bloque (izquierda/derecha/arriba/abajo), lo que sube el vector de entradas de 307 a **319** sin tocar el wire protocol (protocolo v9, 67 campos, sin cambios).
+### Curriculum por tramos (`--curriculum`)
+
+Con varios `--level` configurados, el comportamiento default (round-robin: `LevelIndex = generacion % cantidad_de_niveles`) rota entre tramos **sin mirar el desempeño real** — puede tocarle el tramo difícil a una población que todavía no domina el fácil. `--curriculum` reemplaza esa rotación ciega por progreso con gate:
+
+```bash
+# Arranca en el primer --level y solo avanza al siguiente cuando el %
+# promedio de completions de una ventana de generaciones recientes supera
+# el umbral. Se queda en el ultimo tramo configurado indefinidamente.
+dotnet run --project Neuraval.Evolution.MarioBridge -- --curriculum \
+  --level "Tramo 1 (DP1_tramo1.state)" \
+  --level "Tramo 2 (DP1_tramo2.state)" \
+  --level "Tramo 3 (DP1_tramo3.state)" \
+  --level "Tramo 4 (DP1_tramo4.state)" \
+  --level "DP1 completo (DP1.state)"
+
+# Ajustar la ventana movil (default 8 generaciones) y el umbral de completions
+# para avanzar de tramo (default 50%):
+dotnet run --project Neuraval.Evolution.MarioBridge -- --curriculum --curriculum-window 12 --curriculum-threshold 60
+```
+
+Cómo funciona:
+
+- Cada tramo es, ni más ni menos, uno de los `--level` que ya soporta el proyecto — mismo mecanismo de savestates de la sección "Configuración de savestates" de más arriba (necesitás crear vos el `.state` de cada tramo y mapearlo en `SAVESTATE_FILES` dentro de `mario_bridge.lua`; `--curriculum` no crea savestates nuevos, solo cambia el orden/criterio con el que se recorren los que vos configuraste).
+- Todos los workers usan el mismo tramo en una generación dada (no se reparten entre tramos distintos); el criterio de avance mira el `% completado` de la generación completa (`evaluator.Completions / attempts`, el mismo dato que ya se loguea en `fitness_history.csv`).
+- Avanza de tramo cuando el promedio de ese `%` en la ventana móvil (`--curriculum-window` generaciones más recientes) alcanza el umbral (`--curriculum-threshold`). Al avanzar, la ventana se vacía y arranca de cero para el tramo nuevo.
+- Al llegar al último `--level` configurado, se queda ahí para siempre — no hay "graduación" automática hacia otros niveles (por ejemplo DP2): eso lo seguís manejando vos agregando más `--level` a la lista cuando quieras.
+- El tramo actual (y cuántas generaciones lleva en él) se guarda en el checkpoint (`checkpoints/mario_checkpoint.navm`), así que cortar y retomar el entrenamiento no reinicia el progreso del curriculum. Checkpoints de antes de esta función simplemente arrancan en el tramo 0.
+- `fitness_history.csv` suma dos columnas al final: `curriculum_stage` (1-based; vacío si `--curriculum` no está activo) y `curriculum_window_avg_pct` (el promedio de la ventana en el momento de esa generación).
+- Con un solo `--level` (o ninguno) `--curriculum` no tiene a dónde avanzar y el aviso de arranque lo deja explícito; en ese caso se comporta igual que sin la bandera.
+
+El fitness por generación combina avance horizontal con bonificaciones (nivel completado, power-ups, monedas, monedas Yoshi con bonus por juntar las 5, checkpoint/punto medio) y penalizaciones (daño recibido, muerte). El `mario_bridge.lua` implementa el protocolo v12 (70 campos) con los comandos `RESET`, `CAPTURE` y `STOP`, incluyendo status/stun/flags/misc de sprites, off-screen full/eaten/interacción objeto/timer giro, cluster sprites, capas 2/3, segundo jugador, timers de POW/door/player, tilemap con valores crudos de Map16, senales de monedas/bloques-moneda, bloques de dialogo (Map16 completo `$0104-$0107`), acantilados (2 huecos: distancia+anchura), banderas de item sostenido/sostenible ($1470/$148F + status $14C8), checkpoint de punto medio ($13CE/$13CD), contador de monedas Yoshi ($1420), señales de pared/hueco vertical (distancia en tiles a la primera pared sólida hacia la derecha a la altura del cuerpo de Mario, y a la primera plataforma sólida arriba/abajo en la columna de Mario, escaneando hasta `GridRadius` tiles; 0 = nada detectado en rango), bandera de nivel vertical (`$7E:1412`, scroll vertical habilitado/condicional, colapsado a 0/1) y señal de tubería vertical transitable cercana (Map16 completo `$0137`/`$0138`, tiles superiores de tubería exit-enabled). El overlay de vision debug (`mario_bridge.lua`, tecla V) mostraba una cuadricula de 13x13 tiles que dejaba franjas de la pantalla (256x224px) sin cubrir. Se subio `GRID_RADIUS`/`SnesState.GridRadius` de 6 a 8 (grid de 17x17 = 289 tiles) para que el agente reciba toda la pantalla visible en vez de una ventana recortada centrada en Mario. Esto no cambia el wire protocol (los tiles siguen siendo un bloque de tamano variable dentro del mismo campo), pero si sube el vector de entradas de 326 a **446** (289-169=120 tiles nuevos). Los datasets e checkpoints grabados con `GridRadius=6` quedan obsoletos por el cambio de tamano de la capa de entrada y deben recapturarse/reentrenarse desde cero.
+
+Los datasets e checkpoints grabados con el protocolo v11 quedan obsoletos por el cambio de entradas (323→326) y deben recapturarse. Los datasets e checkpoints grabados con el protocolo v8 quedan obsoletos por el cambio de entradas (298→307) y salidas (6→7, se agrega Arriba) y deben recapturarse. El campo `Blocked` de Mario ($7E:0077, formato `SxxMUDLR`) y el de cada sprite cercano ($7E:1588, formato `xxxxUDLR`) ya no se pasan crudos/bitmask a la red: se decodifican en 4 señales binarias por bloque (izquierda/derecha/arriba/abajo), lo que sube el vector de entradas de 307 a **319** sin tocar el wire protocol (protocolo v9, 67 campos, sin cambios).
+
+### Evaluación de generalización (`--evaluate`)
+
+`--evaluate` corre el mejor modelo NEAT contra uno o más `--level` **sin entrenar ni modificar nada** (ni el checkpoint, ni el modelo, ni `fitness_history.csv`) y reporta, por nivel, cuántos episodios completó, el best X promedio/máximo y cómo murió. Es la herramienta pensada para la Fase 5 del roadmap ("generalización"): la única forma objetiva de saber si el agente "aprendió a jugar" y no memorizó DP1 es medirlo en un nivel donde **no** entrenó.
+
+```bash
+# Evalua el mejor modelo del entrenamiento (checkpoints/mario_best.navm) en DP1,
+# 10 episodios (default), sin tocar el checkpoint ni entrenar nada.
+dotnet run --project Neuraval.Evolution.MarioBridge -- --evaluate
+
+# Lo interesante para Fase 5: correrlo contra un nivel en el que el modelo
+# NUNCA entreno (por ejemplo, un savestate de DP2 que ya tengas mapeado en
+# mario_bridge.lua) para ver si generaliza o no.
+dotnet run --project Neuraval.Evolution.MarioBridge -- --evaluate --level "DP2 (held-out, DP2.state)" --episodes 15
+
+# Comparar "nivel conocido" vs "nivel held-out" en la misma corrida (dos
+# entradas de --level, cada una se evalua por separado con sus propias
+# metricas):
+dotnet run --project Neuraval.Evolution.MarioBridge -- --evaluate \
+  --level "DP1 (entrenado, DP1.state)" \
+  --level "DP2 (held-out, DP2.state)" \
+  --episodes 15
+
+# Evaluar un modelo especifico en vez del ultimo mejor
+dotnet run --project Neuraval.Evolution.MarioBridge -- --evaluate --model checkpoints/mario_best_backup.navm
+```
+
+Cómo funciona:
+
+- Carga un genoma NEAT ya entrenado (`--model`, default `checkpoints/mario_best.navm` — el que ya se guarda solo en cada generación del entrenamiento evolutivo) y lo hace jugar `--episodes` veces (default 10) por cada `--level` configurado, en orden, reseteando entre episodios.
+- No hay backprop, ni mutación, ni escritura de checkpoint: es puramente observacional. El único archivo que escribe es el reporte.
+- Cada episodio termina por muerte, nivel completado, reset manual, o un tope de pasos (mismo límite que usa el entrenamiento evolutivo) si el agente queda trabado sin morir ni completar.
+- Al terminar, imprime una tabla por nivel (episodios, % completado, best X promedio/máximo, muertes por enemigo/caída, tope de pasos) y agrega filas a `checkpoints/generalization_report.csv` (acumulativo entre corridas, con timestamp y ruta del modelo usado — así podés comparar cómo generaliza un modelo a medida que sigue entrenando).
+- Un episodio cortado a mano con Ctrl+C no se cuenta en el reporte (para no ensuciarlo con una corrida incompleta); el resto de episodios ya terminados sí quedan.
+- El código no sabe (ni intenta adivinar) qué `--level` es "conocido" y cuál es "held-out" — eso lo sabe quien corre el comando según con qué savestates entrenó. `--evaluate` solo te da los números por nivel para que vos hagas esa comparación.
 
 ## Running the tests
 

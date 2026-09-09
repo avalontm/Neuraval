@@ -13,17 +13,6 @@ namespace Neuraval.Evolution.Neat
 
         public int LastSpeciesCount { get; private set; }
 
-        // El mejor genoma encontrado en toda la corrida hasta ahora. Se
-        // fuerza su presencia en cada generacion nueva (ver NextGeneration),
-        // independientemente de en que especie cayo o si esa especie
-        // sobrevivio la especiacion. Sin esto, con poblaciones chicas
-        // (5 agentes) es facil que el mejor genoma desaparezca para
-        // siempre: la elite por especie (EliteCountPerSpecies) solo actua
-        // si una especie individual llega a MinSpeciesSizeForElite
-        // miembros, algo que casi nunca pasa una vez que la poblacion se
-        // divide en 2+ especies. El progreso quedaba "guardado" en el
-        // checkpoint como dato (BestGenomeEver) pero nunca volvia a
-        // sembrar la evolucion activa.
         public NeatGenome? GlobalBestGenome { get; set; }
 
         public NeatEvolutionStrategy(Random random, NeatInnovationTracker tracker, NeatEvolutionOptions options, Func<NeatGenome, TAgent> agentFactory)
@@ -36,8 +25,6 @@ namespace Neuraval.Evolution.Neat
 
         public IReadOnlyList<TAgent> NextGeneration(IReadOnlyList<TAgent> currentGeneration, IReadOnlyList<float> fitnessScores)
         {
-            _tracker.ResetGenerationCache();
-
             var population = currentGeneration
                 .Select((agent, index) => (Genome: agent.Genome, Fitness: fitnessScores[index]))
                 .ToList();
@@ -45,8 +32,11 @@ namespace Neuraval.Evolution.Neat
             var speciesGroups = Speciate(population);
             LastSpeciesCount = speciesGroups.Count;
 
+            var minFitness = population.Count > 0 ? population.Min(individual => individual.Fitness) : 0f;
+            var fitnessOffset = minFitness < 0f ? -minFitness : 0f;
+
             var adjustedFitnessSums = speciesGroups
-                .Select(group => group.Sum(individual => individual.Fitness / group.Count))
+                .Select(group => group.Sum(individual => (individual.Fitness + fitnessOffset) / group.Count))
                 .ToList();
 
             var totalAdjustedFitness = adjustedFitnessSums.Sum();
@@ -117,10 +107,6 @@ namespace Neuraval.Evolution.Neat
                 offspringGenomes = offspringGenomes.Take(populationSize).ToList();
             }
 
-            // Elitismo global: pase lo que pase con la especiacion de esta
-            // generacion, el mejor genoma historico siempre ocupa un lugar
-            // en la proxima poblacion. Reemplaza el primer slot en vez de
-            // agregarse aparte para no alterar el tamano de poblacion.
             if (GlobalBestGenome != null && offspringGenomes.Count > 0)
             {
                 offspringGenomes[0] = GlobalBestGenome.Clone();

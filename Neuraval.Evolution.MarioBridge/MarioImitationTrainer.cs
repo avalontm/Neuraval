@@ -13,6 +13,12 @@ namespace Neuraval.Evolution.MarioBridge
         private const float RewardWeightStrength = 2f;
         private const int ValidationPortion = 10;
         private const int Patience = 5;
+        private const int TerminalBoostFrames = 30;
+        private const float CompletionBoostPeak = 2.5f;
+        private const float BoostGamma = 0.9f;
+        private const int DeathNearFrames = 4;
+        private const float DeathNearMultiplier = 0.7f;
+        private const float MaxSampleWeight = 8f;
 
         private readonly MarioDataset _dataset;
         private readonly int _epochs;
@@ -23,7 +29,7 @@ namespace Neuraval.Evolution.MarioBridge
             _epochs = epochs;
         }
 
-        public MarioPolicyNetwork Train(Random random)
+        public MarioPolicyNetwork Train(Random random, MarioPolicyNetwork? seed = null)
         {
             var inputCount = _dataset.InputCount;
             var hiddenSize = MarioPolicyNetwork.DefaultHiddenSize;
@@ -31,6 +37,14 @@ namespace Neuraval.Evolution.MarioBridge
             var sampleCount = _dataset.Samples.Count;
 
             var network = MarioPolicyNetwork.Create(inputCount, outputCount, random, hiddenSize);
+
+            if (seed != null && seed.InputCount == inputCount && seed.OutputCount == outputCount && seed.HiddenSize == hiddenSize)
+            {
+                Array.Copy(seed.WeightsIn, network.WeightsIn, Math.Min(seed.WeightsIn.Length, network.WeightsIn.Length));
+                Array.Copy(seed.BiasHidden, network.BiasHidden, Math.Min(seed.BiasHidden.Length, network.BiasHidden.Length));
+                Array.Copy(seed.WeightsOut, network.WeightsOut, Math.Min(seed.WeightsOut.Length, network.WeightsOut.Length));
+                Array.Copy(seed.BiasOut, network.BiasOut, Math.Min(seed.BiasOut.Length, network.BiasOut.Length));
+            }
 
             var weightsIn = network.WeightsIn;
             var biasHidden = network.BiasHidden;
@@ -80,6 +94,8 @@ namespace Neuraval.Evolution.MarioBridge
                     sampleWeights[i] = MarioRewardWeighting.Compute(samples[i].Reward, minReward, maxReward, RewardWeightStrength);
                 }
             }
+
+            ApplyTerminalShaping(samples, sampleWeights);
 
             var hiddenValues = new float[hiddenSize];
             var outputValues = new float[outputCount];
@@ -276,6 +292,43 @@ namespace Neuraval.Evolution.MarioBridge
             }
 
             return sampleWeight * loss;
+        }
+
+        private static void ApplyTerminalShaping(List<MarioDatasetSample> samples, float[] weights)
+        {
+            for (var i = 0; i < samples.Count; i++)
+            {
+                if (!samples[i].Done)
+                {
+                    continue;
+                }
+
+                var reason = samples[i].TerminalReason;
+                if (reason == (int)MarioTerminalReason.LevelComplete)
+                {
+                    var start = Math.Max(0, i - TerminalBoostFrames + 1);
+                    var decay = TerminalBoostFrames - 1;
+                    for (var j = i; j >= start; j--)
+                    {
+                        var boost = 1f + CompletionBoostPeak * MathF.Pow(BoostGamma, decay);
+                        weights[j] *= boost;
+                        decay--;
+                    }
+                }
+                else if (reason == (int)MarioTerminalReason.Death)
+                {
+                    weights[i] = 0f;
+                    for (var d = 1; d <= DeathNearFrames && i - d >= 0; d++)
+                    {
+                        weights[i - d] *= DeathNearMultiplier;
+                    }
+                }
+            }
+
+            for (var i = 0; i < weights.Length; i++)
+            {
+                weights[i] = Math.Clamp(weights[i], 0f, MaxSampleWeight);
+            }
         }
 
         private static float ComputeValidationLoss(

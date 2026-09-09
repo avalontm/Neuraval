@@ -57,11 +57,5 @@ namespace Neuraval.Evolution.Neat
             _nodeSplitInnovations[connectionInnovation] = result;
             return result;
         }
-
-        public void ResetGenerationCache()
-        {
-            _connectionInnovations.Clear();
-            _nodeSplitInnovations.Clear();
-        }
     }
 }

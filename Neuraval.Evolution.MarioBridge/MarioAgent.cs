@@ -4,8 +4,10 @@ namespace Neuraval.Evolution.MarioBridge
 {
     public sealed class MarioAgent : IAgent<SnesState, SnesAction>, INeatAgent<MarioAgent>
     {
-        public const int InputCount = MarioStateEncoder.InputCount;
+        public const int InputCount = MarioStateEncoder.StackedInputCount;
         public const int OutputCount = MarioAgentOutput.Count;
+
+        private readonly MarioEncoderStack _history = new();
 
         public NeatGenome Genome { get; }
 
@@ -24,9 +26,14 @@ namespace Neuraval.Evolution.MarioBridge
             return new MarioAgent(genome);
         }
 
+        public void ResetHistory()
+        {
+            _history.Reset();
+        }
+
         public SnesAction Decide(SnesState state)
         {
-            var input = MarioStateEncoder.Encode(state);
+            var input = _history.Encode(state);
             var output = Genome.Evaluate(input);
             return MarioAgentOutput.ToAction(output);
         }

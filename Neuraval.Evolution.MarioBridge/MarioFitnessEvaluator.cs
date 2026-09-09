@@ -1,3 +1,6 @@
+using System;
+using System.Threading;
+
 namespace Neuraval.Evolution.MarioBridge
 {
     public enum MarioDeathCause
@@ -10,27 +13,41 @@ namespace Neuraval.Evolution.MarioBridge
     public sealed class MarioFitnessEvaluator : IFitnessEvaluator<MarioAgent, SnesState, SnesAction>
     {
         private const float EnemyContactRadius = 20f;
+        private const int FallScreenBottomMargin = 224;
+
         private const float LevelCompleteBonus = 5000f;
-        private const float PowerupGainWorth = 80f;
-        private const float CoinWorth = 25f;
-        private const float DamagePenalty = 20f;
-        private const float DeathPenalty = 250f;
-        private const int StagnationStepLimit = 300;
-
-        // Monedas Yoshi ($7E:1420): valen mucho mas que una moneda normal
-        // porque suelen requerir desviarse del camino/explorar, y coleccionar
-        // las 5 de un nivel da un bonus extra grande para incentivar barrer
-        // el nivel completo en vez de solo correr a la meta.
-        private const float YoshiCoinWorth = 150f;
+        private const float DeathPenalty = 400f;
+        private const float PowerupGainWorth = 40f;
+        private const float DamagePenalty = 40f;
+        private const float CoinWorth = 5f;
+        private const float YoshiCoinWorth = 30f;
         private const int YoshiCoinsPerLevel = 5;
-        private const float AllYoshiCoinsBonus = 1000f;
+        private const float AllYoshiCoinsBonus = 150f;
+        private const float MidwayPointBonus = 50f;
 
-        // Punto medio / checkpoint ($7E:13CE): recompensa por activarlo, para
-        // que la IA aprenda a pisar la barra de mitad de nivel (guarda el
-        // progreso de respawn) en vez de ignorarla.
-        private const float MidwayPointBonus = 300f;
+        private const int NoMovementStepLimit = 300;
 
         private readonly int _maxSteps;
+        private int _completions;
+        private int _deathsByEnemy;
+        private int _deathsByFall;
+        private int _stepsCapTerminations;
+        private int _bestXThisGeneration;
+
+        public int Completions => _completions;
+        public int DeathsByEnemy => _deathsByEnemy;
+        public int DeathsByFall => _deathsByFall;
+        public int StepsCapTerminations => _stepsCapTerminations;
+        public int BestXThisGeneration => _bestXThisGeneration;
+
+        public void ResetCounters()
+        {
+            Interlocked.Exchange(ref _completions, 0);
+            Interlocked.Exchange(ref _deathsByEnemy, 0);
+            Interlocked.Exchange(ref _deathsByFall, 0);
+            Interlocked.Exchange(ref _stepsCapTerminations, 0);
+            Interlocked.Exchange(ref _bestXThisGeneration, 0);
+        }
 
         public MarioFitnessEvaluator(int maxSteps)
         {
@@ -40,8 +57,9 @@ namespace Neuraval.Evolution.MarioBridge
         public float Evaluate(MarioAgent agent, IEnvironment<SnesState, SnesAction> environment)
         {
             var state = environment.Reset();
+            agent.ResetHistory();
             var bestX = state.MarioX;
-            var stepsSinceProgress = 0;
+            var stepsWithoutMovement = 0;
             var deathInfo = NoDeath;
 
             var previousPowerup = state.PowerupLevel;
@@ -56,7 +74,8 @@ namespace Neuraval.Evolution.MarioBridge
             var maxYoshiCoinsSeen = state.YoshiCoinsCollected;
             var reachedMidway = state.MidwayPointReached;
 
-            for (var step = 0; step < _maxSteps; step++)
+            var step = 0;
+            for (; step < _maxSteps; step++)
             {
                 var previousState = state;
                 var action = agent.Decide(state);
@@ -66,11 +85,15 @@ namespace Neuraval.Evolution.MarioBridge
                 if (state.MarioX > bestX)
                 {
                     bestX = state.MarioX;
-                    stepsSinceProgress = 0;
+                }
+
+                if (state.MarioX != previousState.MarioX || state.MarioY != previousState.MarioY)
+                {
+                    stepsWithoutMovement = 0;
                 }
                 else
                 {
-                    stepsSinceProgress++;
+                    stepsWithoutMovement++;
                 }
 
                 var powerupDelta = state.PowerupLevel - previousPowerup;
@@ -117,10 +140,29 @@ namespace Neuraval.Evolution.MarioBridge
                     deathInfo = ClassifyDeath(previousState);
                 }
 
-                if (result.Done || stepsSinceProgress >= StagnationStepLimit)
+                if (result.Done || stepsWithoutMovement >= NoMovementStepLimit)
                 {
                     break;
                 }
+            }
+
+            UpdateMax(ref _bestXThisGeneration, bestX);
+
+            if (state.IsLevelComplete)
+            {
+                Interlocked.Increment(ref _completions);
+            }
+            else if (deathInfo.Cause == MarioDeathCause.Enemy)
+            {
+                Interlocked.Increment(ref _deathsByEnemy);
+            }
+            else if (deathInfo.Cause == MarioDeathCause.FallOrHazard)
+            {
+                Interlocked.Increment(ref _deathsByFall);
+            }
+            else if (step >= _maxSteps || state.ManualResetRequested)
+            {
+                Interlocked.Increment(ref _stepsCapTerminations);
             }
 
             float fitness = bestX;
@@ -161,17 +203,52 @@ namespace Neuraval.Evolution.MarioBridge
 
         private static readonly DeathInfo NoDeath = new(MarioDeathCause.None, 0, 0, 0);
 
+        public static string DescribeDeath(SnesState lastLivingState)
+        {
+            var info = ClassifyDeath(lastLivingState);
+            if (info.Cause == MarioDeathCause.None)
+            {
+                return string.Empty;
+            }
+
+            return info.Cause == MarioDeathCause.Enemy
+                ? $"enemigo {MarioSpriteNames.Name(info.SpriteType)} (${info.SpriteType:X2}) cerca de X={info.EnemyX}, Y={info.EnemyY}"
+                : "caida/peligro (pozo, lava, pinchos...)";
+        }
+
+        public static MarioDeathCause ClassifyDeathCause(SnesState state)
+        {
+            return ClassifyDeath(state).Cause;
+        }
+
         private static DeathInfo ClassifyDeath(SnesState lastLivingState)
+        {
+            var (nearestType, nearestX, nearestY, nearestDistanceSquared) = NearestSpriteWithDistance(lastLivingState);
+
+            var fellBelowScreen = lastLivingState.MarioY - lastLivingState.CameraY >= FallScreenBottomMargin;
+            if (fellBelowScreen)
+            {
+                return new DeathInfo(MarioDeathCause.FallOrHazard, nearestType, nearestX, nearestY);
+            }
+
+            var enemyInContactRange = nearestDistanceSquared <= EnemyContactRadius * EnemyContactRadius;
+
+            return enemyInContactRange
+                ? new DeathInfo(MarioDeathCause.Enemy, nearestType, nearestX, nearestY)
+                : new DeathInfo(MarioDeathCause.FallOrHazard, nearestType, nearestX, nearestY);
+        }
+
+        private static (int Type, int X, int Y, float DistanceSquared) NearestSpriteWithDistance(SnesState state)
         {
             var nearestDistanceSquared = float.MaxValue;
             var nearestType = 0;
             var nearestX = 0;
             var nearestY = 0;
 
-            foreach (var sprite in lastLivingState.Sprites)
+            foreach (var sprite in state.Sprites)
             {
-                var dx = sprite.X - lastLivingState.MarioX;
-                var dy = sprite.Y - lastLivingState.MarioY;
+                var dx = sprite.X - state.MarioX;
+                var dy = sprite.Y - state.MarioY;
                 var distanceSquared = dx * dx + dy * dy;
 
                 if (distanceSquared < nearestDistanceSquared)
@@ -183,9 +260,17 @@ namespace Neuraval.Evolution.MarioBridge
                 }
             }
 
-            return nearestDistanceSquared <= EnemyContactRadius * EnemyContactRadius
-                ? new DeathInfo(MarioDeathCause.Enemy, nearestType, nearestX, nearestY)
-                : new DeathInfo(MarioDeathCause.FallOrHazard, nearestType, nearestX, nearestY);
+            return (nearestType, nearestX, nearestY, nearestDistanceSquared);
+        }
+
+        private static void UpdateMax(ref int target, int value)
+        {
+            int initial, computed;
+            do
+            {
+                initial = target;
+                computed = Math.Max(initial, value);
+            } while (Interlocked.CompareExchange(ref target, computed, initial) != initial);
         }
     }
 }
