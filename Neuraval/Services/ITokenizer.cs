@@ -10,6 +10,7 @@ namespace Neuraval.Core.Services
         int SepToken { get; }
 
         void BuildVocabulary(List<string> texts);
+        void BuildVocabulary(List<string> texts, int vocabSize);
         int[] Encode(string text, bool addSpecialTokens = true);
         string Decode(int[] tokenIds, bool skipSpecialTokens = true);
         int[] EncodeCausalSequence(string prompt, string response);

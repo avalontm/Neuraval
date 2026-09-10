@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Neuraval.Abstractions;
 using Neuraval.Core.Utils;
+using Neuraval.Cuda;
+using Neuraval.Tensor;
 
 namespace Neuraval.Core.Models
 {
@@ -27,6 +29,15 @@ namespace Neuraval.Core.Models
         private float[,]? _pendingHiddenStateGradients;
         private float[] _accumulatedOutputBiasGradients;
         private AdamVectorOptimizer _outputBiasOptimizer = null!;
+        private CudaWeightCache _outputProjectionCache = null!;
+
+        /// <summary>
+        /// Cuando hay LoRA habilitado con congelamiento de base (Fase 5.5),
+        /// <see cref="UpdateWeights"/> deja de tocar el embedding, la norma
+        /// final y el bias de salida — solo se entrenan los adaptadores LoRA
+        /// dentro de cada <see cref="TransformerBlock"/>.
+        /// </summary>
+        private bool _freezeNonLoraWeights;
 
         public float[,]? PendingHiddenStateGradients => _pendingHiddenStateGradients;
 
@@ -35,6 +46,7 @@ namespace Neuraval.Core.Models
         public int VocabSize => _vocabSize;
         public int EmbeddingDim => _embeddingDim;
         public int MaxSequenceLength => _maxSequenceLength;
+        public bool HasLora => _blocks.Count > 0 && _blocks[0].HasLora;
 
         public TransformerModel(
             int vocabSize,
@@ -74,6 +86,83 @@ namespace Neuraval.Core.Models
             _outputBiasGradients = new float[_vocabSize];
             _accumulatedOutputBiasGradients = new float[_vocabSize];
             _outputBiasOptimizer = new AdamVectorOptimizer(_vocabSize);
+            _outputProjectionCache = new CudaWeightCache(_vocabSize, _embeddingDim);
+        }
+
+        /// <summary>
+        /// Habilita adaptadores LoRA (Fase 5.5) en la capa de atención de
+        /// cada bloque del modelo. Si <paramref name="freezeBase"/> es true
+        /// (default), además congela todo lo demás — embedding, bloques
+        /// completos salvo los adaptadores, norma final y bias de salida —
+        /// de forma que <see cref="UpdateWeights"/> solo entrene A/B de LoRA.
+        /// No hace nada si el modelo ya tenía LoRA habilitado.
+        /// </summary>
+        public void EnableLora(int rank, float alpha, bool freezeBase = true, int seed = 9001)
+        {
+            if (HasLora) return;
+
+            for (int i = 0; i < _blocks.Count; i++)
+            {
+                _blocks[i].EnableLora(rank, alpha, seed + i * 10);
+                _blocks[i].SetFreezeBaseWeights(freezeBase);
+            }
+
+            _freezeNonLoraWeights = freezeBase;
+        }
+
+        /// <summary>
+        /// Guarda únicamente los adaptadores LoRA de todos los bloques (y el
+        /// flag de congelamiento), pensado para exportar/importar por
+        /// separado del modelo base con el formato <c>.navlora</c>. Devuelve
+        /// <c>null</c> si el modelo no tiene LoRA habilitado.
+        /// </summary>
+        public TransformerModelLoraState? SaveLoraState()
+        {
+            if (!HasLora) return null;
+
+            var state = new TransformerModelLoraState
+            {
+                NumLayers = _numLayers,
+                EmbeddingDim = _embeddingDim,
+                FreezeNonLoraWeights = _freezeNonLoraWeights
+            };
+
+            foreach (var block in _blocks)
+            {
+                var blockLoraState = block.SaveLoraState()
+                    ?? throw new InvalidOperationException("Bloque sin adaptadores LoRA en un modelo que reporta HasLora=true");
+                state.BlockStates.Add(blockLoraState);
+            }
+
+            return state;
+        }
+
+        /// <summary>
+        /// Carga adaptadores LoRA previamente exportados (por ejemplo desde un
+        /// archivo <c>.navlora</c>) sobre este modelo. Habilita LoRA en cada
+        /// bloque si todavía no estaba habilitado.
+        /// </summary>
+        public void LoadLoraState(TransformerModelLoraState state)
+        {
+            if (state.EmbeddingDim != _embeddingDim || state.NumLayers != _numLayers)
+            {
+                throw new ArgumentException(
+                    $"El adaptador LoRA ({state.NumLayers} capas, embeddingDim={state.EmbeddingDim}) " +
+                    $"no es compatible con este modelo ({_numLayers} capas, embeddingDim={_embeddingDim}).");
+            }
+
+            if (state.BlockStates.Count != _blocks.Count)
+            {
+                throw new ArgumentException(
+                    $"El adaptador LoRA trae {state.BlockStates.Count} bloques pero el modelo tiene {_blocks.Count}.");
+            }
+
+            for (int i = 0; i < _blocks.Count; i++)
+            {
+                _blocks[i].LoadLoraState(state.BlockStates[i]);
+            }
+
+            _freezeNonLoraWeights = state.FreezeNonLoraWeights;
         }
 
         public void ZeroGradients()
@@ -110,7 +199,7 @@ namespace Neuraval.Core.Models
 
         public float ClipGradients(float maxNorm)
         {
-            float gradNorm = CalculateGradientNorm();
+            float gradNorm = CalculateGlobalGradientNorm();
 
             if (gradNorm > maxNorm)
             {
@@ -121,18 +210,18 @@ namespace Neuraval.Core.Models
                     _outputBiasGradients[i] *= scale;
                 });
 
-                _embedding.ClipGradients(maxNorm);
+                _embedding.ScaleGradients(scale);
                 foreach (var block in _blocks)
                 {
-                    block.ClipGradients(maxNorm);
+                    block.ScaleGradients(scale);
                 }
-                _finalNorm.ClipGradients(maxNorm);
+                _finalNorm.ScaleGradients(scale);
             }
 
             return gradNorm;
         }
 
-        private float CalculateGradientNorm()
+        private float CalculateGlobalGradientNorm()
         {
             float sumSquared = 0;
 
@@ -140,6 +229,15 @@ namespace Neuraval.Core.Models
             {
                 sumSquared += _outputBiasGradients[i] * _outputBiasGradients[i];
             }
+
+            sumSquared += _embedding.SumSquaredGradients();
+
+            foreach (var block in _blocks)
+            {
+                sumSquared += block.SumSquaredGradients();
+            }
+
+            sumSquared += _finalNorm.SumSquaredGradients();
 
             return MathF.Sqrt(sumSquared);
         }
@@ -171,22 +269,38 @@ namespace Neuraval.Core.Models
             hidden = _finalNorm.Forward(hidden);
 
             int seqLen = hidden.GetLength(0);
-            var logits = new float[seqLen, _vocabSize];
-
-            Parallel.For(0, seqLen, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, i =>
-            {
-                for (int j = 0; j < _vocabSize; j++)
-                {
-                    float sum = _outputBias[j];
-                    for (int k = 0; k < _embeddingDim; k++)
-                    {
-                        sum += hidden[i, k] * _embedding.EmbeddingsRef[j, k];
-                    }
-                    logits[i, j] = sum;
-                }
-            });
+            var logits = ComputeLogits(hidden, seqLen);
 
             return (hidden, logits);
+        }
+
+        private float[,] ComputeLogits(float[,] hidden, int seqLen)
+        {
+            var device = TensorDeviceSelector.Current;
+
+            try
+            {
+                var hiddenTensor = Neuraval.Tensor.Tensor.FromArray2D(hidden, device);
+                var logitsTensor = TensorOps.MatMulTransposeBCachedB(hiddenTensor, _embedding.EmbeddingsRef, _outputProjectionCache);
+                var logits = new float[seqLen, _vocabSize];
+
+                Parallel.For(0, seqLen, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, i =>
+                {
+                    int rowOffset = i * _vocabSize;
+
+                    for (int j = 0; j < _vocabSize; j++)
+                    {
+                        logits[i, j] = logitsTensor.Buffer[rowOffset + j] + _outputBias[j];
+                    }
+                });
+
+                return logits;
+            }
+            catch (CudaException) when (device == DeviceType.Cuda)
+            {
+                TensorDeviceSelector.ReportFailure();
+                return ComputeLogits(hidden, seqLen);
+            }
         }
 
         private float[,] BuildCausalMask(int sequenceLength)
@@ -210,10 +324,7 @@ namespace Neuraval.Core.Models
             int lastPosition = logits.GetLength(0) - 1;
 
             var lastLogits = new float[_vocabSize];
-            for (int i = 0; i < _vocabSize; i++)
-            {
-                lastLogits[i] = logits[lastPosition, i];
-            }
+            Buffer.BlockCopy(logits, lastPosition * _vocabSize * sizeof(float), lastLogits, 0, _vocabSize * sizeof(float));
 
             return Matematicas.ParallelSoftmax(lastLogits);
         }
@@ -243,6 +354,79 @@ namespace Neuraval.Core.Models
                 {
                     break;
                 }
+            }
+
+            return string.Join(",", tokens);
+        }
+
+        public GenerationCache CreateGenerationCache()
+        {
+            return new GenerationCache(_numLayers, _maxSequenceLength, _embeddingDim);
+        }
+
+        private float[] PredictNextIncremental(int[] newTokens, GenerationCache cache, int position)
+        {
+            if (position + newTokens.Length > _maxSequenceLength)
+            {
+                throw new ArgumentException(
+                    $"La posición {position + newTokens.Length - 1} excede el máximo {_maxSequenceLength - 1}");
+            }
+
+            var embeddings = _embedding.GetEmbeddings(newTokens);
+            var hidden = _positionalEncoding.AddToEmbeddingsAtOffset(embeddings, position);
+
+            for (int i = 0; i < _blocks.Count; i++)
+            {
+                hidden = _blocks[i].ForwardIncremental(hidden, cache.Layers[i]);
+            }
+
+            hidden = _finalNorm.Forward(hidden);
+
+            int lastRow = hidden.GetLength(0) - 1;
+            var lastHidden = new float[1, _embeddingDim];
+            Buffer.BlockCopy(hidden, lastRow * _embeddingDim * sizeof(float), lastHidden, 0, _embeddingDim * sizeof(float));
+
+            var logits = ComputeLogits(lastHidden, 1);
+            var lastLogits = new float[_vocabSize];
+            Buffer.BlockCopy(logits, 0, lastLogits, 0, _vocabSize * sizeof(float));
+
+            return Matematicas.ParallelSoftmax(lastLogits);
+        }
+
+        public string GenerateTextCached(int[] seedTokens, int maxLength, int endToken)
+        {
+            if (seedTokens == null || seedTokens.Length == 0)
+            {
+                throw new ArgumentException("seedTokens no puede estar vacío");
+            }
+
+            if (seedTokens.Length > _maxSequenceLength)
+            {
+                throw new ArgumentException($"Seed sequence length {seedTokens.Length} exceeds maximum {_maxSequenceLength}");
+            }
+
+            var cache = CreateGenerationCache();
+            var tokens = new List<int>(seedTokens);
+
+            var probabilities = PredictNextIncremental(seedTokens, cache, 0);
+
+            for (int i = 0; i < maxLength; i++)
+            {
+                int nextToken = ArgMax(probabilities);
+
+                if (nextToken == endToken)
+                {
+                    break;
+                }
+
+                tokens.Add(nextToken);
+
+                if (tokens.Count >= _maxSequenceLength)
+                {
+                    break;
+                }
+
+                probabilities = PredictNextIncremental(new[] { nextToken }, cache, cache.Length);
             }
 
             return string.Join(",", tokens);
@@ -287,10 +471,7 @@ namespace Neuraval.Core.Models
             for (int i = 0; i < seqLen; i++)
             {
                 var logitsAtPos = new float[_vocabSize];
-                for (int j = 0; j < _vocabSize; j++)
-                {
-                    logitsAtPos[j] = logits[i, j];
-                }
+                Buffer.BlockCopy(logits, i * _vocabSize * sizeof(float), logitsAtPos, 0, _vocabSize * sizeof(float));
 
                 var probs = Matematicas.ParallelSoftmax(logitsAtPos);
 
@@ -351,10 +532,7 @@ namespace Neuraval.Core.Models
                 }
 
                 var logitsAtPosition = new float[_vocabSize];
-                for (int j = 0; j < _vocabSize; j++)
-                {
-                    logitsAtPosition[j] = logits[position, j];
-                }
+                Buffer.BlockCopy(logits, position * _vocabSize * sizeof(float), logitsAtPosition, 0, _vocabSize * sizeof(float));
 
                 var probabilities = Matematicas.ParallelSoftmax(logitsAtPosition);
                 totalLoss += -MathF.Log(MathF.Max(probabilities[targetToken], 1e-10f));
@@ -397,16 +575,6 @@ namespace Neuraval.Core.Models
             return totalLoss / predictedPositions;
         }
 
-        /// <summary>
-        /// Construye la máscara combinada causal+padding para UNA secuencia: además de la
-        /// restricción causal de siempre (j &lt;= i), bloquea también cualquier posición de key
-        /// j &gt;= validLength (relleno de <c>PadToken</c>). Ver la nota extensa en
-        /// <see cref="BuildCausalPaddingMaskBatch"/> sobre por qué esta restricción extra es, en la
-        /// práctica, redundante con el padding a la derecha + la máscara causal para las filas de
-        /// consulta reales — se implementa de todos modos por robustez explícita, siguiendo el
-        /// pedido literal del plan (Fase 2 → diferido a Fase 4.4): "máscara de padding combinada
-        /// con la causal, excluida del cálculo de loss".
-        /// </summary>
         private float[,] BuildCausalPaddingMask(int sequenceLength, int validLength)
         {
             var mask = new float[sequenceLength, sequenceLength];
@@ -422,27 +590,6 @@ namespace Neuraval.Core.Models
             return mask;
         }
 
-        /// <summary>
-        /// Versión por batch de <see cref="BuildCausalPaddingMask"/>: una máscara distinta por
-        /// elemento, porque <c>validLengths</c> difiere entre ejemplos del mismo batch (secuencias
-        /// de distinta longitud real, todas rellenadas con <c>PadToken</c> hasta la misma
-        /// <c>sequenceLength</c> por el llamador — ver <c>SupervisedTrainer.BuildPaddedCausalBatch</c>).
-        ///
-        /// Nota sobre por qué esto es, en rigor, redundante para las posiciones que sí importan:
-        /// con padding a la derecha (el relleno siempre va DESPUÉS del contenido real, nunca antes)
-        /// y máscara causal ya correcta (Fase 1), cualquier posición de consulta real i &lt;
-        /// validLength solo puede atender a keys j &lt;= i &lt; validLength — es decir, la propia
-        /// máscara causal ya excluye el padding para esas filas, sin necesitar la condición extra
-        /// "j &lt; validLength". Esa condición solo cambia algo para las filas de consulta que ELLAS
-        /// MISMAS son padding (i &gt;= validLength), y esas filas nunca se usan: no participan del
-        /// loss (el loop de <see cref="CalculateCausalLossBatch"/> se detiene en
-        /// <c>validLengths[b] - 1</c>) y por lo tanto reciben gradiente cero desde arriba, lo que
-        /// (como se explica en <c>FASE_4_4_CAMBIOS.md</c>) hace que su contribución a los gradientes
-        /// de los pesos compartidos (Q/K/V, feedforward, layer norm) sea exactamente cero sin
-        /// importar qué hayan calculado en el forward. Se implementa la máscara completa de todos
-        /// modos porque es el comportamiento explícito y auditable que pide el plan, y porque deja
-        /// de depender de este razonamiento si en el futuro se cambia a padding por la izquierda.
-        /// </summary>
         private float[,,] BuildCausalPaddingMaskBatch(int sequenceLength, int[] validLengths)
         {
             int batchSize = validLengths.Length;
@@ -457,14 +604,6 @@ namespace Neuraval.Core.Models
             return maskBatch;
         }
 
-        /// <summary>
-        /// Forward por batch con estados ocultos expuestos, análogo a
-        /// <see cref="ForwardWithHiddenStates"/> pero para un batch real (todas las capas usan sus
-        /// métodos <c>*Batch</c> desde la Fase 4.1-4.3). <paramref name="tokenBatch"/> debe venir ya
-        /// rellenado (mismo largo de secuencia para todos los elementos, relleno con
-        /// <c>PadToken</c>) y <paramref name="validLengths"/> indica cuántos tokens de cada fila son
-        /// reales (el resto es padding).
-        /// </summary>
         private (float[,,] hidden, float[,,] logits) ForwardBatchWithHiddenStates(
             int[,] tokenBatch, int[] validLengths, bool training)
         {
@@ -494,50 +633,64 @@ namespace Neuraval.Core.Models
 
             hidden = _finalNorm.ForwardBatch(hidden);
 
-            var logits = new float[batchSize, seqLen, _vocabSize];
-
-            Parallel.For(0, batchSize * seqLen, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, idx =>
-            {
-                int b = idx / seqLen;
-                int i = idx % seqLen;
-
-                for (int j = 0; j < _vocabSize; j++)
-                {
-                    float sum = _outputBias[j];
-                    for (int k = 0; k < _embeddingDim; k++)
-                    {
-                        sum += hidden[b, i, k] * _embedding.EmbeddingsRef[j, k];
-                    }
-                    logits[b, i, j] = sum;
-                }
-            });
+            var logits = ComputeLogitsBatch(hidden, batchSize, seqLen);
 
             return (hidden, logits);
         }
 
-        /// <summary>
-        /// Forward por batch expuesto públicamente (logits únicamente), análogo a
-        /// <see cref="Forward"/> pero para varias secuencias a la vez con padding. Útil para
-        /// inferencia por batch y para tests de equivalencia batch-vs-loop; el entrenamiento real
-        /// pasa por <see cref="CalculateCausalLossBatch"/>, que reutiliza el mismo forward interno.
-        /// </summary>
+        private float[,,] ComputeLogitsBatch(float[,,] hidden, int batchSize, int seqLen)
+        {
+            var device = TensorDeviceSelector.Current;
+
+            try
+            {
+                var flatHidden = FlattenBatch(hidden);
+                var hiddenTensor = Neuraval.Tensor.Tensor.FromArray2D(flatHidden, device);
+                var logitsTensor = TensorOps.MatMulTransposeBCachedB(hiddenTensor, _embedding.EmbeddingsRef, _outputProjectionCache);
+                var logits = new float[batchSize, seqLen, _vocabSize];
+
+                Parallel.For(0, batchSize * seqLen, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, idx =>
+                {
+                    int b = idx / seqLen;
+                    int i = idx % seqLen;
+                    int rowOffset = idx * _vocabSize;
+
+                    for (int j = 0; j < _vocabSize; j++)
+                    {
+                        logits[b, i, j] = logitsTensor.Buffer[rowOffset + j] + _outputBias[j];
+                    }
+                });
+
+                return logits;
+            }
+            catch (CudaException) when (device == DeviceType.Cuda)
+            {
+                TensorDeviceSelector.ReportFailure();
+                return ComputeLogitsBatch(hidden, batchSize, seqLen);
+            }
+        }
+
+        private static float[,] FlattenBatch(float[,,] batch)
+        {
+            int batchSize = batch.GetLength(0);
+            int seqLen = batch.GetLength(1);
+            int dim = batch.GetLength(2);
+            var flat = new float[batchSize * seqLen, dim];
+
+            // batch[b, i, j] y flat[b*seqLen + i, j] son el mismo layout row-major
+            // contiguo en memoria (misma cantidad total de elementos, mismo orden),
+            // así que aplanar es un único memcpy en vez de una copia elemento a elemento.
+            Buffer.BlockCopy(batch, 0, flat, 0, batchSize * seqLen * dim * sizeof(float));
+
+            return flat;
+        }
+
         public float[,,] ForwardBatch(int[,] tokenBatch, int[] validLengths, bool training = true)
         {
             var (_, logits) = ForwardBatchWithHiddenStates(tokenBatch, validLengths, training);
             return logits;
         }
 
-        /// <summary>
-        /// Versión por batch de <see cref="CalculateCausalLoss"/>: mismo esquema (loss y gradiente
-        /// solo desde <c>lossStartIndices[b]</c>, shift de un token, cross-entropy + softmax), pero
-        /// para todo un batch en un solo forward/backward vectorizado por lote en vez de un loop de
-        /// llamadas individuales. Ver <c>FASE_4_4_CAMBIOS.md</c> para la decisión de diseño sobre
-        /// cómo se agregan los gradientes entre ejemplos del batch (suma sin promediar aquí — el
-        /// promedio real es responsabilidad de <see cref="AverageGradients"/>, llamado por el
-        /// trainer después, exactamente igual que en el esquema por-ejemplo anterior) y sobre el
-        /// significado del valor de loss devuelto (promedio por POSICIÓN predicha en todo el batch,
-        /// no promedio de promedios por ejemplo).
-        /// </summary>
         public float CalculateCausalLossBatch(int[,] sequenceBatch, int[] validLengths, int[] lossStartIndices)
         {
             if (sequenceBatch == null)
@@ -588,10 +741,7 @@ namespace Neuraval.Core.Models
                     }
 
                     var logitsAtPosition = new float[_vocabSize];
-                    for (int j = 0; j < _vocabSize; j++)
-                    {
-                        logitsAtPosition[j] = logits[b, position, j];
-                    }
+                    Buffer.BlockCopy(logits, (b * seqLen + position) * _vocabSize * sizeof(float), logitsAtPosition, 0, _vocabSize * sizeof(float));
 
                     var probabilities = Matematicas.ParallelSoftmax(logitsAtPosition);
                     totalLoss += -MathF.Log(MathF.Max(probabilities[targetToken], 1e-10f));
@@ -637,17 +787,26 @@ namespace Neuraval.Core.Models
 
         public void UpdateWeights(float learningRate)
         {
-            _embedding.UpdateWeights(learningRate);
+            if (!_freezeNonLoraWeights)
+            {
+                _embedding.UpdateWeights(learningRate);
+            }
 
             foreach (var block in _blocks)
             {
                 block.UpdateWeights(learningRate);
             }
 
-            _finalNorm.UpdateWeights(learningRate);
+            if (!_freezeNonLoraWeights)
+            {
+                _finalNorm.UpdateWeights(learningRate);
 
-            _outputBiasOptimizer.Update(_outputBias, _outputBiasGradients, learningRate);
+                _outputBiasOptimizer.Update(_outputBias, _outputBiasGradients, learningRate);
+            }
+
             Array.Clear(_outputBiasGradients, 0, _outputBiasGradients.Length);
+
+            _outputProjectionCache.Invalidate();
         }
 
         public TransformerModelState SaveState()
@@ -701,6 +860,12 @@ namespace Neuraval.Core.Models
             _outputBias = (float[])state.OutputBias.Clone();
 
             if (state.OutputBiasOptimizerState != null) _outputBiasOptimizer.LoadStateInto(state.OutputBiasOptimizerState);
+
+            // Si los bloques trajeron adaptadores LoRA con la base congelada,
+            // el modelo entero se considera en modo "solo LoRA" al recargarlo.
+            _freezeNonLoraWeights = _blocks.Count > 0 && _blocks[0].HasLora && _blocks[0].IsBaseFrozen;
+
+            _outputProjectionCache.Invalidate();
         }
 
     }

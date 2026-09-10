@@ -55,62 +55,6 @@ namespace Neuraval.Core.Utils
             }
         }
 
-        public static void DisableGpu()
-        {
-            _gpuEnabled = false;
-        }
-
-        public static float[,] MatrixMultiplyAuto(float[,] a, float[,] b)
-        {
-            if (_gpuEnabled)
-            {
-                try
-                {
-                    return CudaMath.MatrixMultiply(a, b);
-                }
-                catch
-                {
-                    _gpuEnabled = false;
-                }
-            }
-
-            return ParallelMatrixMultiply(a, b);
-        }
-
-        public static float[,] MatrixMultiplyTransposeBAuto(float[,] a, float[,] b, float scale = 1.0f)
-        {
-            if (_gpuEnabled)
-            {
-                try
-                {
-                    return CudaMath.MatrixMultiplyTransposeB(a, b, scale);
-                }
-                catch
-                {
-                    _gpuEnabled = false;
-                }
-            }
-
-            return ParallelMatrixMultiplyTransposeB(a, b, scale);
-        }
-
-        public static float[,] MatrixMultiplyTransposeAAuto(float[,] a, float[,] b)
-        {
-            if (_gpuEnabled)
-            {
-                try
-                {
-                    return CudaMath.MatrixMultiplyTransposeA(a, b);
-                }
-                catch
-                {
-                    _gpuEnabled = false;
-                }
-            }
-
-            return ParallelMatrixMultiplyTransposeA(a, b);
-        }
-
         public static float[,] ParallelMatrixMultiplyTransposeA(float[,] a, float[,] b)
         {
             int p = a.GetLength(0);
@@ -138,23 +82,6 @@ namespace Neuraval.Core.Utils
             });
 
             return result;
-        }
-
-        public static float[,] SoftmaxRowsAuto(float[,] input)
-        {
-            if (_gpuEnabled)
-            {
-                try
-                {
-                    return CudaMath.SoftmaxRows(input);
-                }
-                catch
-                {
-                    _gpuEnabled = false;
-                }
-            }
-
-            return ParallelSoftmaxRows(input);
         }
 
         public static float[,] ParallelSoftmaxRows(float[,] input)
@@ -186,23 +113,6 @@ namespace Neuraval.Core.Utils
             });
 
             return output;
-        }
-
-        public static float[,] LayerNormRowsAuto(float[,] input, float[] gamma, float[] beta, float epsilon, out float[] mean, out float[] std)
-        {
-            if (_gpuEnabled)
-            {
-                try
-                {
-                    return CudaMath.LayerNormRows(input, gamma, beta, epsilon, out mean, out std);
-                }
-                catch
-                {
-                    _gpuEnabled = false;
-                }
-            }
-
-            return ParallelLayerNormRows(input, gamma, beta, epsilon, out mean, out std);
         }
 
         public static float[,] ParallelLayerNormRows(float[,] input, float[] gamma, float[] beta, float epsilon, out float[] mean, out float[] std)
@@ -321,40 +231,6 @@ namespace Neuraval.Core.Utils
 
                 parameters[i] -= learningRate * mHat / (MathF.Sqrt(vHat) + epsilon);
             }
-        }
-
-        public static float[,] MatrixMultiplyAutoCached(float[,] a, float[,] weights, CudaWeightCache weightCache)
-        {
-            if (_gpuEnabled)
-            {
-                try
-                {
-                    return CudaMath.MatrixMultiplyCachedB(a, weights, weightCache);
-                }
-                catch
-                {
-                    _gpuEnabled = false;
-                }
-            }
-
-            return ParallelMatrixMultiply(a, weights);
-        }
-
-        public static float[,] MatrixMultiplyTransposeBAutoCached(float[,] a, float[,] weights, CudaWeightCache weightCache, float scale = 1.0f)
-        {
-            if (_gpuEnabled)
-            {
-                try
-                {
-                    return CudaMath.MatrixMultiplyTransposeBCachedB(a, weights, weightCache, scale);
-                }
-                catch
-                {
-                    _gpuEnabled = false;
-                }
-            }
-
-            return ParallelMatrixMultiplyTransposeB(a, weights, scale);
         }
 
         public static float[,] ParallelMatrixMultiplyTransposeB(float[,] a, float[,] b, float scale = 1.0f)
@@ -511,36 +387,6 @@ namespace Neuraval.Core.Utils
             });
         }
 
-        public static float[,] ParallelSoftmax2D(float[,] input)
-        {
-            int rows = input.GetLength(0);
-            int cols = input.GetLength(1);
-            var output = new float[rows, cols];
-
-            Parallel.For(0, rows, GetParallelOptions(), i =>
-            {
-                float max = float.NegativeInfinity;
-                for (int j = 0; j < cols; j++)
-                {
-                    if (input[i, j] > max) max = input[i, j];
-                }
-
-                float sum = 0;
-                for (int j = 0; j < cols; j++)
-                {
-                    output[i, j] = (float)Math.Exp(input[i, j] - max);
-                    sum += output[i, j];
-                }
-
-                for (int j = 0; j < cols; j++)
-                {
-                    output[i, j] /= sum;
-                }
-            });
-
-            return output;
-        }
-
         public static float[] ParallelSoftmax(float[] input)
         {
             float max = input.Max();
@@ -581,35 +427,6 @@ namespace Neuraval.Core.Utils
             });
 
             return result;
-        }
-
-        public static void ParallelUpdateWeights(float[,] weights, float[,] gradients, float learningRate)
-        {
-            int rows = weights.GetLength(0);
-            int cols = weights.GetLength(1);
-
-            Parallel.For(0, rows, GetParallelOptions(), i =>
-            {
-                for (int j = 0; j < cols; j++)
-                {
-                    weights[i, j] -= learningRate * gradients[i, j];
-                }
-            });
-        }
-
-        public static void ParallelUpdateWeightsWithClip(float[,] weights, float[,] gradients, float learningRate, float clipValue)
-        {
-            int rows = weights.GetLength(0);
-            int cols = weights.GetLength(1);
-
-            Parallel.For(0, rows, GetParallelOptions(), i =>
-            {
-                for (int j = 0; j < cols; j++)
-                {
-                    float grad = Math.Max(-clipValue, Math.Min(clipValue, gradients[i, j]));
-                    weights[i, j] -= learningRate * grad;
-                }
-            });
         }
 
         public static void ParallelClearMatrix(float[,] matrix)
@@ -667,40 +484,6 @@ namespace Neuraval.Core.Utils
                             rowR[j] += aVal * rowB[j];
                         }
                     }
-                }
-            }
-
-            return result;
-        }
-
-        public static float[,] SequentialTranspose(float[,] matrix)
-        {
-            int rows = matrix.GetLength(0);
-            int cols = matrix.GetLength(1);
-            var result = new float[cols, rows];
-
-            for (int i = 0; i < rows; i++)
-            {
-                for (int j = 0; j < cols; j++)
-                {
-                    result[j, i] = matrix[i, j];
-                }
-            }
-
-            return result;
-        }
-
-        public static float[,] SequentialMatrixScale(float[,] matrix, float scalar)
-        {
-            int rows = matrix.GetLength(0);
-            int cols = matrix.GetLength(1);
-            var result = new float[rows, cols];
-
-            for (int i = 0; i < rows; i++)
-            {
-                for (int j = 0; j < cols; j++)
-                {
-                    result[i, j] = matrix[i, j] * scalar;
                 }
             }
 
@@ -773,68 +556,6 @@ namespace Neuraval.Core.Utils
             return partialSums.Sum();
         }
 
-        public static float[,] SequentialExtractColumns(float[,] matrix, int startCol, int endCol)
-        {
-            int rows = matrix.GetLength(0);
-            int numCols = endCol - startCol;
-            var result = new float[rows, numCols];
-
-            for (int i = 0; i < rows; i++)
-            {
-                for (int j = 0; j < numCols; j++)
-                {
-                    result[i, j] = matrix[i, startCol + j];
-                }
-            }
-
-            return result;
-        }
-
-        public static void SequentialSetColumns(float[,] target, float[,] source, int startCol)
-        {
-            int rows = target.GetLength(0);
-            int sourceCols = source.GetLength(1);
-
-            for (int i = 0; i < rows; i++)
-            {
-                for (int j = 0; j < sourceCols; j++)
-                {
-                    target[i, startCol + j] = source[i, j];
-                }
-            }
-        }
-
-        public static float[,] ExtractColumns(float[,] matrix, int startCol, int endCol)
-        {
-            int rows = matrix.GetLength(0);
-            int numCols = endCol - startCol;
-            var result = new float[rows, numCols];
-
-            Parallel.For(0, rows, GetParallelOptions(), i =>
-            {
-                for (int j = 0; j < numCols; j++)
-                {
-                    result[i, j] = matrix[i, startCol + j];
-                }
-            });
-
-            return result;
-        }
-
-        public static void SetColumns(float[,] target, float[,] source, int startCol)
-        {
-            int rows = target.GetLength(0);
-            int sourceCols = source.GetLength(1);
-
-            Parallel.For(0, rows, GetParallelOptions(), i =>
-            {
-                for (int j = 0; j < sourceCols; j++)
-                {
-                    target[i, startCol + j] = source[i, j];
-                }
-            });
-        }
-
         // ---------------------------------------------------------------
         // Fase 4.1 - Operaciones por batch (batch como dimensión extra).
         // Representación: float[,,] con forma [batch, filas, columnas].
@@ -846,35 +567,12 @@ namespace Neuraval.Core.Utils
         // paralelismo es tarea de la Fase 4.4, no de acá.
         // ---------------------------------------------------------------
 
-        public static float[,] GetBatchSlice(float[,,] batch, int batchIndex)
-        {
-            int rows = batch.GetLength(1);
-            int cols = batch.GetLength(2);
-            var result = new float[rows, cols];
-
-            for (int i = 0; i < rows; i++)
-            {
-                for (int j = 0; j < cols; j++)
-                {
-                    result[i, j] = batch[batchIndex, i, j];
-                }
-            }
-
-            return result;
-        }
-
         public static void SetBatchSlice(float[,,] batch, int batchIndex, float[,] matrix)
         {
             int rows = matrix.GetLength(0);
             int cols = matrix.GetLength(1);
 
-            for (int i = 0; i < rows; i++)
-            {
-                for (int j = 0; j < cols; j++)
-                {
-                    batch[batchIndex, i, j] = matrix[i, j];
-                }
-            }
+            Buffer.BlockCopy(matrix, 0, batch, batchIndex * rows * cols * sizeof(float), rows * cols * sizeof(float));
         }
 
         public static float[,] FlattenBatch(float[,,] batch)
@@ -884,16 +582,10 @@ namespace Neuraval.Core.Utils
             int dim = batch.GetLength(2);
             var flat = new float[batchSize * seqLen, dim];
 
-            Parallel.For(0, batchSize * seqLen, GetParallelOptions(), flatIndex =>
-            {
-                int b = flatIndex / seqLen;
-                int i = flatIndex % seqLen;
-
-                for (int j = 0; j < dim; j++)
-                {
-                    flat[flatIndex, j] = batch[b, i, j];
-                }
-            });
+            // batch[b, i, j] y flat[b*seqLen + i, j] comparten el mismo layout
+            // row-major contiguo: aplanar es un único memcpy, no una copia
+            // elemento a elemento (mismo caso que TransformerModel.FlattenBatch).
+            Buffer.BlockCopy(batch, 0, flat, 0, batchSize * seqLen * dim * sizeof(float));
 
             return flat;
         }
@@ -903,262 +595,10 @@ namespace Neuraval.Core.Utils
             int dim = flat.GetLength(1);
             var batch = new float[batchSize, seqLen, dim];
 
-            Parallel.For(0, batchSize * seqLen, GetParallelOptions(), flatIndex =>
-            {
-                int b = flatIndex / seqLen;
-                int i = flatIndex % seqLen;
-
-                for (int j = 0; j < dim; j++)
-                {
-                    batch[b, i, j] = flat[flatIndex, j];
-                }
-            });
+            Buffer.BlockCopy(flat, 0, batch, 0, batchSize * seqLen * dim * sizeof(float));
 
             return batch;
         }
 
-        public static float[,,] ToBatch(float[][,] matrices)
-        {
-            int batchSize = matrices.Length;
-            int rows = matrices[0].GetLength(0);
-            int cols = matrices[0].GetLength(1);
-            var batch = new float[batchSize, rows, cols];
-
-            for (int b = 0; b < batchSize; b++)
-            {
-                if (matrices[b].GetLength(0) != rows || matrices[b].GetLength(1) != cols)
-                {
-                    throw new ArgumentException("Todos los elementos del batch deben tener la misma forma (usar padding antes de llamar a ToBatch)");
-                }
-
-                SetBatchSlice(batch, b, matrices[b]);
-            }
-
-            return batch;
-        }
-
-        public static float[][,] FromBatch(float[,,] batch)
-        {
-            int batchSize = batch.GetLength(0);
-            var matrices = new float[batchSize][,];
-
-            for (int b = 0; b < batchSize; b++)
-            {
-                matrices[b] = GetBatchSlice(batch, b);
-            }
-
-            return matrices;
-        }
-
-        public static unsafe float[,,] BatchMatrixMultiply(float[,,] a, float[,,] b)
-        {
-            int batchSize = a.GetLength(0);
-            int rowsA = a.GetLength(1);
-            int colsA = a.GetLength(2);
-            int colsB = b.GetLength(2);
-
-            if (b.GetLength(0) != batchSize)
-            {
-                throw new ArgumentException("Ambos batches deben tener el mismo tamaño de batch");
-            }
-
-            if (colsA != b.GetLength(1))
-            {
-                throw new ArgumentException("Matrix dimensions do not match for multiplication");
-            }
-
-            var result = new float[batchSize, rowsA, colsB];
-            int vecSize = Vector<float>.Count;
-
-            fixed (float* pa = a, pb = b, pr = result)
-            {
-                nint baseA = (nint)pa;
-                nint baseB = (nint)pb;
-                nint baseR = (nint)pr;
-
-                Parallel.For(0, batchSize * rowsA, GetParallelOptions(), flatIndex =>
-                {
-                    unsafe
-                    {
-                        int batchIdx = flatIndex / rowsA;
-                        int i = flatIndex % rowsA;
-
-                        float* rowA = (float*)baseA + ((long)batchIdx * rowsA + i) * colsA;
-                        float* rowR = (float*)baseR + ((long)batchIdx * rowsA + i) * colsB;
-                        float* batchBaseB = (float*)baseB + (long)batchIdx * colsA * colsB;
-
-                        for (int k = 0; k < colsA; k++)
-                        {
-                            float aVal = rowA[k];
-                            var aVec = new Vector<float>(aVal);
-                            float* rowB = batchBaseB + (long)k * colsB;
-
-                            int j = 0;
-                            for (; j <= colsB - vecSize; j += vecSize)
-                            {
-                                var bVec = *(Vector<float>*)(rowB + j);
-                                var rVec = *(Vector<float>*)(rowR + j);
-                                rVec += aVec * bVec;
-                                *(Vector<float>*)(rowR + j) = rVec;
-                            }
-                            for (; j < colsB; j++)
-                            {
-                                rowR[j] += aVal * rowB[j];
-                            }
-                        }
-                    }
-                });
-            }
-
-            return result;
-        }
-
-        public static float[,,] BatchMatrixAdd(float[,,] a, float[,,] b)
-        {
-            int batchSize = a.GetLength(0);
-            int rows = a.GetLength(1);
-            int cols = a.GetLength(2);
-
-            if (b.GetLength(0) != batchSize || b.GetLength(1) != rows || b.GetLength(2) != cols)
-            {
-                throw new ArgumentException("Matrix dimensions must match for addition");
-            }
-
-            var result = new float[batchSize, rows, cols];
-
-            Parallel.For(0, batchSize * rows, GetParallelOptions(), flatIndex =>
-            {
-                int batchIdx = flatIndex / rows;
-                int i = flatIndex % rows;
-
-                for (int j = 0; j < cols; j++)
-                {
-                    result[batchIdx, i, j] = a[batchIdx, i, j] + b[batchIdx, i, j];
-                }
-            });
-
-            return result;
-        }
-
-        public static float[,,] BatchMatrixScale(float[,,] batch, float scalar)
-        {
-            int batchSize = batch.GetLength(0);
-            int rows = batch.GetLength(1);
-            int cols = batch.GetLength(2);
-            var result = new float[batchSize, rows, cols];
-
-            Parallel.For(0, batchSize * rows, GetParallelOptions(), flatIndex =>
-            {
-                int batchIdx = flatIndex / rows;
-                int i = flatIndex % rows;
-
-                for (int j = 0; j < cols; j++)
-                {
-                    result[batchIdx, i, j] = batch[batchIdx, i, j] * scalar;
-                }
-            });
-
-            return result;
-        }
-
-        public static float[,,] BatchReLU(float[,,] batch)
-        {
-            int batchSize = batch.GetLength(0);
-            int rows = batch.GetLength(1);
-            int cols = batch.GetLength(2);
-            var result = new float[batchSize, rows, cols];
-
-            Parallel.For(0, batchSize * rows, GetParallelOptions(), flatIndex =>
-            {
-                int batchIdx = flatIndex / rows;
-                int i = flatIndex % rows;
-
-                for (int j = 0; j < cols; j++)
-                {
-                    result[batchIdx, i, j] = Math.Max(0, batch[batchIdx, i, j]);
-                }
-            });
-
-            return result;
-        }
-
-        public static float[,,] BatchSoftmax2D(float[,,] batch)
-        {
-            int batchSize = batch.GetLength(0);
-            int rows = batch.GetLength(1);
-            int cols = batch.GetLength(2);
-            var output = new float[batchSize, rows, cols];
-
-            Parallel.For(0, batchSize * rows, GetParallelOptions(), flatIndex =>
-            {
-                int batchIdx = flatIndex / rows;
-                int i = flatIndex % rows;
-
-                float max = float.NegativeInfinity;
-                for (int j = 0; j < cols; j++)
-                {
-                    if (batch[batchIdx, i, j] > max) max = batch[batchIdx, i, j];
-                }
-
-                float sum = 0;
-                for (int j = 0; j < cols; j++)
-                {
-                    float e = (float)Math.Exp(batch[batchIdx, i, j] - max);
-                    output[batchIdx, i, j] = e;
-                    sum += e;
-                }
-
-                for (int j = 0; j < cols; j++)
-                {
-                    output[batchIdx, i, j] /= sum;
-                }
-            });
-
-            return output;
-        }
-
-        public static float[,,] BatchTranspose(float[,,] batch)
-        {
-            int batchSize = batch.GetLength(0);
-            int rows = batch.GetLength(1);
-            int cols = batch.GetLength(2);
-            var result = new float[batchSize, cols, rows];
-
-            Parallel.For(0, batchSize * rows, GetParallelOptions(), flatIndex =>
-            {
-                int batchIdx = flatIndex / rows;
-                int i = flatIndex % rows;
-
-                for (int j = 0; j < cols; j++)
-                {
-                    result[batchIdx, j, i] = batch[batchIdx, i, j];
-                }
-            });
-
-            return result;
-        }
-
-        public static float BatchSum(float[,,] batch)
-        {
-            int batchSize = batch.GetLength(0);
-            int rows = batch.GetLength(1);
-            int cols = batch.GetLength(2);
-            var partialSums = new float[batchSize * rows];
-
-            Parallel.For(0, batchSize * rows, GetParallelOptions(), flatIndex =>
-            {
-                int batchIdx = flatIndex / rows;
-                int i = flatIndex % rows;
-
-                float sum = 0;
-                for (int j = 0; j < cols; j++)
-                {
-                    sum += batch[batchIdx, i, j];
-                }
-                partialSums[flatIndex] = sum;
-            });
-
-            return partialSums.Sum();
-        }
     }
 }

@@ -60,16 +60,10 @@ namespace Neuraval.Core.Utils
                 TimeStep = _timeStep
             };
 
-            int index = 0;
-            for (int i = 0; i < rows; i++)
-            {
-                for (int j = 0; j < cols; j++)
-                {
-                    state.M[index] = _m[i, j];
-                    state.V[index] = _v[i, j];
-                    index++;
-                }
-            }
+            // _m/_v son float[,] rectangulares: su layout en memoria ya es row-major
+            // contiguo e idéntico al de M/V (float[]), así que aplanar es un memcpy.
+            Buffer.BlockCopy(_m, 0, state.M, 0, rows * cols * sizeof(float));
+            Buffer.BlockCopy(_v, 0, state.V, 0, rows * cols * sizeof(float));
 
             return state;
         }
@@ -85,16 +79,8 @@ namespace Neuraval.Core.Utils
                     $"Forma del estado del optimizador ({state.Rows}x{state.Cols}) no coincide con la forma actual ({rows}x{cols})");
             }
 
-            int index = 0;
-            for (int i = 0; i < rows; i++)
-            {
-                for (int j = 0; j < cols; j++)
-                {
-                    _m[i, j] = state.M[index];
-                    _v[i, j] = state.V[index];
-                    index++;
-                }
-            }
+            Buffer.BlockCopy(state.M, 0, _m, 0, rows * cols * sizeof(float));
+            Buffer.BlockCopy(state.V, 0, _v, 0, rows * cols * sizeof(float));
 
             _timeStep = state.TimeStep;
         }

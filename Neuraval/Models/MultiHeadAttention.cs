@@ -1,7 +1,10 @@
 ﻿using System;
+using System.Linq;
 using System.Threading.Tasks;
+using Neuraval.Core.Quantization;
 using Neuraval.Core.Utils;
 using Neuraval.Cuda;
+using Neuraval.Tensor;
 
 namespace Neuraval.Core.Models
 {
@@ -17,15 +20,15 @@ namespace Neuraval.Core.Models
         private float[,] _valueWeights;
         private float[,] _outputWeights;
 
-        private float[,] _queryGradients;
-        private float[,] _keyGradients;
-        private float[,] _valueGradients;
-        private float[,] _outputGradients;
+        private Neuraval.Tensor.Tensor _queryGradients;
+        private Neuraval.Tensor.Tensor _keyGradients;
+        private Neuraval.Tensor.Tensor _valueGradients;
+        private Neuraval.Tensor.Tensor _outputGradients;
 
-        private float[,] _accumulatedQueryGradients;
-        private float[,] _accumulatedKeyGradients;
-        private float[,] _accumulatedValueGradients;
-        private float[,] _accumulatedOutputGradients;
+        private Neuraval.Tensor.Tensor _accumulatedQueryGradients;
+        private Neuraval.Tensor.Tensor _accumulatedKeyGradients;
+        private Neuraval.Tensor.Tensor _accumulatedValueGradients;
+        private Neuraval.Tensor.Tensor _accumulatedOutputGradients;
 
         private AdamMatrixOptimizer _queryOptimizer = null!;
         private AdamMatrixOptimizer _keyOptimizer = null!;
@@ -37,31 +40,28 @@ namespace Neuraval.Core.Models
         private CudaWeightCache _valueWeightsCache = null!;
         private CudaWeightCache _outputWeightsCache = null!;
 
+        private CudaWeightCacheFp16 _queryWeightsCacheFp16 = null!;
+        private CudaWeightCacheFp16 _keyWeightsCacheFp16 = null!;
+        private CudaWeightCacheFp16 _valueWeightsCacheFp16 = null!;
+        private CudaWeightCacheFp16 _outputWeightsCacheFp16 = null!;
+
+        private Int8WeightCache _queryWeightsCacheInt8 = null!;
+        private Int8WeightCache _keyWeightsCacheInt8 = null!;
+        private Int8WeightCache _valueWeightsCacheInt8 = null!;
+        private Int8WeightCache _outputWeightsCacheInt8 = null!;
+
+        private LoraProjection? _queryLora;
+        private LoraProjection? _keyLora;
+        private LoraProjection? _valueLora;
+        private LoraProjection? _outputLora;
+        private bool _freezeBaseWeights;
+
         private float[,] _lastInput;
         private float[,,] _lastAttentionWeights;
         private float[,] _lastQueries;
         private float[,] _lastKeys;
         private float[,] _lastValues;
         private float[,] _lastConcatOutput;
-
-        private float[][,]? _scoresBufferPerHead;
-
-        private float[,] GetScoresBuffer(int headIndex, int seqLen)
-        {
-            if (_scoresBufferPerHead == null || _scoresBufferPerHead.Length != _numHeads)
-            {
-                _scoresBufferPerHead = new float[_numHeads][,];
-            }
-
-            var buffer = _scoresBufferPerHead[headIndex];
-            if (buffer == null || buffer.GetLength(0) != seqLen || buffer.GetLength(1) != seqLen)
-            {
-                buffer = new float[seqLen, seqLen];
-                _scoresBufferPerHead[headIndex] = buffer;
-            }
-
-            return buffer;
-        }
 
         private float[,,]? _lastInputBatch;
         private float[,,,]? _lastAttentionWeightsBatch;
@@ -72,6 +72,8 @@ namespace Neuraval.Core.Models
 
         public int EmbeddingDim => _embeddingDim;
         public int NumHeads => _numHeads;
+        public bool HasLora => _queryLora != null;
+        public bool FreezeBaseWeightsEnabled => _freezeBaseWeights;
 
         public MultiHeadAttention(int embeddingDim, int numHeads, int seed = 42)
         {
@@ -97,15 +99,15 @@ namespace Neuraval.Core.Models
             _valueWeights = InitializeMatrix(_embeddingDim, _embeddingDim, limit);
             _outputWeights = InitializeMatrix(_embeddingDim, _embeddingDim, limit);
 
-            _queryGradients = new float[_embeddingDim, _embeddingDim];
-            _keyGradients = new float[_embeddingDim, _embeddingDim];
-            _valueGradients = new float[_embeddingDim, _embeddingDim];
-            _outputGradients = new float[_embeddingDim, _embeddingDim];
+            _queryGradients = new Neuraval.Tensor.Tensor(new[] { _embeddingDim, _embeddingDim });
+            _keyGradients = new Neuraval.Tensor.Tensor(new[] { _embeddingDim, _embeddingDim });
+            _valueGradients = new Neuraval.Tensor.Tensor(new[] { _embeddingDim, _embeddingDim });
+            _outputGradients = new Neuraval.Tensor.Tensor(new[] { _embeddingDim, _embeddingDim });
 
-            _accumulatedQueryGradients = new float[_embeddingDim, _embeddingDim];
-            _accumulatedKeyGradients = new float[_embeddingDim, _embeddingDim];
-            _accumulatedValueGradients = new float[_embeddingDim, _embeddingDim];
-            _accumulatedOutputGradients = new float[_embeddingDim, _embeddingDim];
+            _accumulatedQueryGradients = new Neuraval.Tensor.Tensor(new[] { _embeddingDim, _embeddingDim });
+            _accumulatedKeyGradients = new Neuraval.Tensor.Tensor(new[] { _embeddingDim, _embeddingDim });
+            _accumulatedValueGradients = new Neuraval.Tensor.Tensor(new[] { _embeddingDim, _embeddingDim });
+            _accumulatedOutputGradients = new Neuraval.Tensor.Tensor(new[] { _embeddingDim, _embeddingDim });
 
             _queryOptimizer = new AdamMatrixOptimizer(_embeddingDim, _embeddingDim);
             _keyOptimizer = new AdamMatrixOptimizer(_embeddingDim, _embeddingDim);
@@ -116,6 +118,54 @@ namespace Neuraval.Core.Models
             _keyWeightsCache = new CudaWeightCache(_embeddingDim, _embeddingDim);
             _valueWeightsCache = new CudaWeightCache(_embeddingDim, _embeddingDim);
             _outputWeightsCache = new CudaWeightCache(_embeddingDim, _embeddingDim);
+
+            _queryWeightsCacheFp16 = new CudaWeightCacheFp16(_embeddingDim, _embeddingDim);
+            _keyWeightsCacheFp16 = new CudaWeightCacheFp16(_embeddingDim, _embeddingDim);
+            _valueWeightsCacheFp16 = new CudaWeightCacheFp16(_embeddingDim, _embeddingDim);
+            _outputWeightsCacheFp16 = new CudaWeightCacheFp16(_embeddingDim, _embeddingDim);
+
+            _queryWeightsCacheInt8 = new Int8WeightCache(_embeddingDim, _embeddingDim);
+            _keyWeightsCacheInt8 = new Int8WeightCache(_embeddingDim, _embeddingDim);
+            _valueWeightsCacheInt8 = new Int8WeightCache(_embeddingDim, _embeddingDim);
+            _outputWeightsCacheInt8 = new Int8WeightCache(_embeddingDim, _embeddingDim);
+        }
+
+        public void EnableLora(int rank, float alpha, int seed = 9001)
+        {
+            if (_queryLora != null) return;
+
+            _queryLora = new LoraProjection(_embeddingDim, _embeddingDim, rank, alpha, seed);
+            _keyLora = new LoraProjection(_embeddingDim, _embeddingDim, rank, alpha, seed + 1);
+            _valueLora = new LoraProjection(_embeddingDim, _embeddingDim, rank, alpha, seed + 2);
+            _outputLora = new LoraProjection(_embeddingDim, _embeddingDim, rank, alpha, seed + 3);
+        }
+
+        public void SetFreezeBaseWeights(bool freeze)
+        {
+            _freezeBaseWeights = freeze;
+        }
+
+        public LoraAttentionState? SaveLoraState()
+        {
+            if (_queryLora == null) return null;
+
+            return new LoraAttentionState
+            {
+                Query = _queryLora.SaveState(),
+                Key = _keyLora!.SaveState(),
+                Value = _valueLora!.SaveState(),
+                Output = _outputLora!.SaveState(),
+                FreezeBaseWeights = _freezeBaseWeights
+            };
+        }
+
+        public void LoadLoraState(LoraAttentionState state)
+        {
+            _queryLora = LoraProjection.LoadState(state.Query);
+            _keyLora = LoraProjection.LoadState(state.Key);
+            _valueLora = LoraProjection.LoadState(state.Value);
+            _outputLora = LoraProjection.LoadState(state.Output);
+            _freezeBaseWeights = state.FreezeBaseWeights;
         }
 
         private float[,] InitializeMatrix(int rows, int cols, float limit)
@@ -133,10 +183,15 @@ namespace Neuraval.Core.Models
 
         public void ZeroGradients()
         {
-            Matematicas.ParallelClearMatrix(_accumulatedQueryGradients);
-            Matematicas.ParallelClearMatrix(_accumulatedKeyGradients);
-            Matematicas.ParallelClearMatrix(_accumulatedValueGradients);
-            Matematicas.ParallelClearMatrix(_accumulatedOutputGradients);
+            TensorOps.Clear(_accumulatedQueryGradients);
+            TensorOps.Clear(_accumulatedKeyGradients);
+            TensorOps.Clear(_accumulatedValueGradients);
+            TensorOps.Clear(_accumulatedOutputGradients);
+
+            _queryLora?.ZeroGradients();
+            _keyLora?.ZeroGradients();
+            _valueLora?.ZeroGradients();
+            _outputLora?.ZeroGradients();
         }
 
         public void AverageGradients(int batchSize)
@@ -146,58 +201,50 @@ namespace Neuraval.Core.Models
 
             float scale = 1.0f / batchSize;
 
-            Parallel.For(0, _embeddingDim, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, i =>
-            {
-                for (int j = 0; j < _embeddingDim; j++)
-                {
-                    _queryGradients[i, j] = _accumulatedQueryGradients[i, j] * scale;
-                    _keyGradients[i, j] = _accumulatedKeyGradients[i, j] * scale;
-                    _valueGradients[i, j] = _accumulatedValueGradients[i, j] * scale;
-                    _outputGradients[i, j] = _accumulatedOutputGradients[i, j] * scale;
-                }
-            });
+            _queryGradients = TensorOps.Scale(_accumulatedQueryGradients, scale);
+            _keyGradients = TensorOps.Scale(_accumulatedKeyGradients, scale);
+            _valueGradients = TensorOps.Scale(_accumulatedValueGradients, scale);
+            _outputGradients = TensorOps.Scale(_accumulatedOutputGradients, scale);
+
+            _queryLora?.AverageGradients(batchSize);
+            _keyLora?.AverageGradients(batchSize);
+            _valueLora?.AverageGradients(batchSize);
+            _outputLora?.AverageGradients(batchSize);
         }
 
-        public void ClipGradients(float maxNorm)
+        public float SumSquaredGradients()
         {
-            float totalNorm = 0;
-            object lockObj = new object();
+            float totalSumSquared = 0;
 
-            Parallel.For(0, _embeddingDim, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, () => 0.0f, (i, loop, partial) =>
-            {
-                for (int j = 0; j < _embeddingDim; j++)
-                {
-                    partial += _queryGradients[i, j] * _queryGradients[i, j];
-                    partial += _keyGradients[i, j] * _keyGradients[i, j];
-                    partial += _valueGradients[i, j] * _valueGradients[i, j];
-                    partial += _outputGradients[i, j] * _outputGradients[i, j];
-                }
-                return partial;
-            }, partial =>
-            {
-                lock (lockObj)
-                {
-                    totalNorm += partial;
-                }
-            });
+            totalSumSquared += SumSquared(_queryGradients);
+            totalSumSquared += SumSquared(_keyGradients);
+            totalSumSquared += SumSquared(_valueGradients);
+            totalSumSquared += SumSquared(_outputGradients);
 
-            totalNorm = MathF.Sqrt(totalNorm);
+            if (_queryLora != null) totalSumSquared += _queryLora.SumSquaredGradients();
+            if (_keyLora != null) totalSumSquared += _keyLora.SumSquaredGradients();
+            if (_valueLora != null) totalSumSquared += _valueLora.SumSquaredGradients();
+            if (_outputLora != null) totalSumSquared += _outputLora.SumSquaredGradients();
 
-            if (totalNorm > maxNorm)
-            {
-                float scale = maxNorm / (totalNorm + 1e-10f);
+            return totalSumSquared;
+        }
 
-                Parallel.For(0, _embeddingDim, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, i =>
-                {
-                    for (int j = 0; j < _embeddingDim; j++)
-                    {
-                        _queryGradients[i, j] *= scale;
-                        _keyGradients[i, j] *= scale;
-                        _valueGradients[i, j] *= scale;
-                        _outputGradients[i, j] *= scale;
-                    }
-                });
-            }
+        private static float SumSquared(Neuraval.Tensor.Tensor tensor)
+        {
+            return TensorOps.Sum(TensorOps.Multiply(tensor, tensor));
+        }
+
+        public void ScaleGradients(float scale)
+        {
+            _queryGradients = TensorOps.Scale(_queryGradients, scale);
+            _keyGradients = TensorOps.Scale(_keyGradients, scale);
+            _valueGradients = TensorOps.Scale(_valueGradients, scale);
+            _outputGradients = TensorOps.Scale(_outputGradients, scale);
+
+            _queryLora?.ScaleGradients(scale);
+            _keyLora?.ScaleGradients(scale);
+            _valueLora?.ScaleGradients(scale);
+            _outputLora?.ScaleGradients(scale);
         }
 
         public float[,] Forward(float[,] input, float[,]? mask = null)
@@ -212,61 +259,76 @@ namespace Neuraval.Core.Models
 
             _lastInput = (float[,])input.Clone();
 
-            var queries = Matematicas.MatrixMultiplyAutoCached(input, _queryWeights, _queryWeightsCache);
-            var keys = Matematicas.MatrixMultiplyAutoCached(input, _keyWeights, _keyWeightsCache);
-            var values = Matematicas.MatrixMultiplyAutoCached(input, _valueWeights, _valueWeightsCache);
+            var device = TensorDeviceSelector.Current;
 
-            _lastQueries = queries;
-            _lastKeys = keys;
-            _lastValues = values;
-
-            var output = new float[seqLen, _embeddingDim];
-            _lastAttentionWeights = new float[_numHeads, seqLen, seqLen];
-
-            var headOutputs = new float[_numHeads][,];
-
-            Parallel.For(0, _numHeads, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, head =>
+            try
             {
-                int startIdx = head * _headDim;
-                int endIdx = startIdx + _headDim;
+                var inputTensor = Neuraval.Tensor.Tensor.FromArray2D(input, device);
 
-                var headQueries = Matematicas.SequentialExtractColumns(queries, startIdx, endIdx);
-                var headKeys = Matematicas.SequentialExtractColumns(keys, startIdx, endIdx);
-                var headValues = Matematicas.SequentialExtractColumns(values, startIdx, endIdx);
+                var queryTensor = TensorOps.MatMulCachedB(inputTensor, _queryWeights, _queryWeightsCache);
+                var keyTensor = TensorOps.MatMulCachedB(inputTensor, _keyWeights, _keyWeightsCache);
+                var valueTensor = TensorOps.MatMulCachedB(inputTensor, _valueWeights, _valueWeightsCache);
 
-                headOutputs[head] = ScaledDotProductAttention(
-                    headQueries, headKeys, headValues, mask, head);
-            });
+                if (_queryLora != null) TensorOps.AddInPlace(queryTensor, _queryLora.Forward(inputTensor, device));
+                if (_keyLora != null) TensorOps.AddInPlace(keyTensor, _keyLora.Forward(inputTensor, device));
+                if (_valueLora != null) TensorOps.AddInPlace(valueTensor, _valueLora.Forward(inputTensor, device));
 
-            for (int head = 0; head < _numHeads; head++)
-            {
-                int startIdx = head * _headDim;
-                Matematicas.SetColumns(output, headOutputs[head], startIdx);
+                _lastQueries = queryTensor.ToArray2D();
+                _lastKeys = keyTensor.ToArray2D();
+                _lastValues = valueTensor.ToArray2D();
+
+                var outputTensor = new Neuraval.Tensor.Tensor(new[] { seqLen, _embeddingDim }, device);
+                _lastAttentionWeights = new float[_numHeads, seqLen, seqLen];
+
+                var headOutputs = new Neuraval.Tensor.Tensor[_numHeads];
+
+                Parallel.For(0, _numHeads, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, head =>
+                {
+                    int startIdx = head * _headDim;
+                    int endIdx = startIdx + _headDim;
+
+                    var headQueries = TensorOps.SliceColumns(queryTensor, startIdx, endIdx);
+                    var headKeys = TensorOps.SliceColumns(keyTensor, startIdx, endIdx);
+                    var headValues = TensorOps.SliceColumns(valueTensor, startIdx, endIdx);
+
+                    headOutputs[head] = ScaledDotProductAttention(headQueries, headKeys, headValues, mask, head, device);
+                });
+
+                for (int head = 0; head < _numHeads; head++)
+                {
+                    int startIdx = head * _headDim;
+                    TensorOps.SetColumns(outputTensor, headOutputs[head], startIdx);
+                }
+
+                var output = outputTensor.ToArray2D();
+                _lastConcatOutput = output;
+
+                var finalOutputTensor = TensorOps.MatMulCachedB(outputTensor, _outputWeights, _outputWeightsCache);
+
+                if (_outputLora != null) TensorOps.AddInPlace(finalOutputTensor, _outputLora.Forward(outputTensor, device));
+
+                return finalOutputTensor.ToArray2D();
             }
-
-            _lastConcatOutput = output;
-
-            var finalOutput = Matematicas.MatrixMultiplyAutoCached(output, _outputWeights, _outputWeightsCache);
-            return finalOutput;
+            catch (CudaException) when (device == DeviceType.Cuda)
+            {
+                TensorDeviceSelector.ReportFailure();
+                return Forward(input, mask);
+            }
+            catch (AggregateException ex) when (device == DeviceType.Cuda && ex.InnerExceptions.Any(inner => inner is CudaException))
+            {
+                TensorDeviceSelector.ReportFailure();
+                return Forward(input, mask);
+            }
         }
 
-        private float[,] ScaledDotProductAttention(
-            float[,] queries, float[,] keys, float[,] values,
-            float[,]? mask, int headIndex)
+        private Neuraval.Tensor.Tensor ScaledDotProductAttention(
+            Neuraval.Tensor.Tensor queries, Neuraval.Tensor.Tensor keys, Neuraval.Tensor.Tensor values,
+            float[,]? mask, int headIndex, DeviceType device)
         {
-            int seqLen = queries.GetLength(0);
+            int seqLen = queries.Shape[0];
             float scale = MathF.Sqrt(_headDim);
 
-            var scores = GetScoresBuffer(headIndex, seqLen);
-            var computedScores = Matematicas.MatrixMultiplyTransposeBAuto(queries, keys, 1.0f / scale);
-
-            for (int i = 0; i < seqLen; i++)
-            {
-                for (int j = 0; j < seqLen; j++)
-                {
-                    scores[i, j] = computedScores[i, j];
-                }
-            }
+            var scoresTensor = TensorOps.MatMulTransposeB(queries, keys, 1.0f / scale);
 
             if (mask != null)
             {
@@ -276,26 +338,178 @@ namespace Neuraval.Core.Models
                     {
                         if (mask[i, j] == 0)
                         {
-                            scores[i, j] = float.NegativeInfinity;
+                            scoresTensor.Buffer[i * seqLen + j] = float.NegativeInfinity;
                         }
                     }
                 }
             }
 
-            var attentionWeights = Matematicas.SoftmaxRowsAuto(scores);
+            var attentionWeightsTensor = TensorOps.SoftmaxRows(scoresTensor);
 
-            for (int i = 0; i < seqLen; i++)
+            Buffer.BlockCopy(attentionWeightsTensor.Buffer, 0, _lastAttentionWeights, headIndex * seqLen * seqLen * sizeof(float), seqLen * seqLen * sizeof(float));
+
+            return TensorOps.MatMul(attentionWeightsTensor, values);
+        }
+
+        private static Neuraval.Tensor.Tensor MatMulCachedBInference(
+            Neuraval.Tensor.Tensor input, float[,] weights,
+            CudaWeightCache fp32Cache, CudaWeightCacheFp16 fp16Cache, Int8WeightCache int8Cache, DeviceType device)
+        {
+            if (device == DeviceType.Cuda && MixedPrecisionSettings.EnableFp16Inference)
             {
-                for (int j = 0; j < seqLen; j++)
-                {
-                    _lastAttentionWeights[headIndex, i, j] = attentionWeights[i, j];
-                }
+                int mFp16 = input.Shape[0];
+                int kFp16 = input.Shape[1];
+                int nFp16 = weights.GetLength(1);
+
+                var resultFp16 = CudaMath.MatrixMultiplyCachedBHalf(input.Buffer, weights, fp16Cache, mFp16, kFp16, nFp16);
+                return new Neuraval.Tensor.Tensor(resultFp16, new[] { mFp16, nFp16 }, device, input.DType);
             }
 
-            var output = Matematicas.MatrixMultiplyAuto(attentionWeights, values);
+            if (device == DeviceType.Cpu && Int8InferenceSettings.EnableInt8Cpu)
+            {
+                return Int8MatMul.MatMulCachedB(input, weights, int8Cache);
+            }
 
-            return output;
+            return TensorOps.MatMulCachedB(input, weights, fp32Cache);
         }
+
+        public float[,] ForwardInference(float[,] input, bool causal)
+        {
+            int seqLen = input.GetLength(0);
+            int embDim = input.GetLength(1);
+
+            if (embDim != _embeddingDim)
+            {
+                throw new ArgumentException($"Input embedding dimension {embDim} does not match expected {_embeddingDim}");
+            }
+
+            var device = TensorDeviceSelector.Current;
+
+            try
+            {
+                var inputTensor = Neuraval.Tensor.Tensor.FromArray2D(input, device);
+
+                var queriesTensor = MatMulCachedBInference(inputTensor, _queryWeights, _queryWeightsCache, _queryWeightsCacheFp16, _queryWeightsCacheInt8, device);
+                var keysTensor = MatMulCachedBInference(inputTensor, _keyWeights, _keyWeightsCache, _keyWeightsCacheFp16, _keyWeightsCacheInt8, device);
+                var valuesTensor = MatMulCachedBInference(inputTensor, _valueWeights, _valueWeightsCache, _valueWeightsCacheFp16, _valueWeightsCacheInt8, device);
+
+                // Los adaptadores LoRA siempre se aplican en fp32 (son chicos:
+                // rank x embeddingDim), sin importar el modo de precisión
+                // (fp16/INT8) elegido para los pesos base.
+                if (_queryLora != null) TensorOps.AddInPlace(queriesTensor, _queryLora.Forward(inputTensor, device));
+                if (_keyLora != null) TensorOps.AddInPlace(keysTensor, _keyLora.Forward(inputTensor, device));
+                if (_valueLora != null) TensorOps.AddInPlace(valuesTensor, _valueLora.Forward(inputTensor, device));
+
+                float scaleMultiplier = 1.0f / MathF.Sqrt(_headDim);
+                var outputTensor = new Neuraval.Tensor.Tensor(new[] { seqLen, _embeddingDim }, device);
+                var headOutputs = new Neuraval.Tensor.Tensor[_numHeads];
+
+                Parallel.For(0, _numHeads, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, head =>
+                {
+                    int startIdx = head * _headDim;
+                    int endIdx = startIdx + _headDim;
+
+                    var headQueriesTensor = TensorOps.SliceColumns(queriesTensor, startIdx, endIdx);
+                    var headKeysTensor = TensorOps.SliceColumns(keysTensor, startIdx, endIdx);
+                    var headValuesTensor = TensorOps.SliceColumns(valuesTensor, startIdx, endIdx);
+
+                    headOutputs[head] = FlashAttentionOps.Attend(headQueriesTensor, headKeysTensor, headValuesTensor, causal, scaleMultiplier);
+                });
+
+                for (int head = 0; head < _numHeads; head++)
+                {
+                    TensorOps.SetColumns(outputTensor, headOutputs[head], head * _headDim);
+                }
+
+                return MatMulCachedBInference(outputTensor, _outputWeights, _outputWeightsCache, _outputWeightsCacheFp16, _outputWeightsCacheInt8, device).ToArray2D();
+            }
+            catch (CudaException) when (device == DeviceType.Cuda)
+            {
+                TensorDeviceSelector.ReportFailure();
+                return ForwardInference(input, causal);
+            }
+            catch (AggregateException ex) when (device == DeviceType.Cuda && ex.InnerExceptions.Any(inner => inner is CudaException))
+            {
+                TensorDeviceSelector.ReportFailure();
+                return ForwardInference(input, causal);
+            }
+        }
+
+        public float[,] ForwardIncremental(float[,] newInput, KVCacheLayer cache)
+        {
+            int newSeqLen = newInput.GetLength(0);
+            int embDim = newInput.GetLength(1);
+
+            if (embDim != _embeddingDim)
+            {
+                throw new ArgumentException($"Input embedding dimension {embDim} does not match expected {_embeddingDim}");
+            }
+
+            var device = TensorDeviceSelector.Current;
+
+            try
+            {
+                var inputTensor = Neuraval.Tensor.Tensor.FromArray2D(newInput, device);
+
+                var newQueriesTensor = MatMulCachedBInference(inputTensor, _queryWeights, _queryWeightsCache, _queryWeightsCacheFp16, _queryWeightsCacheInt8, device);
+                var newKeys = MatMulCachedBInference(inputTensor, _keyWeights, _keyWeightsCache, _keyWeightsCacheFp16, _keyWeightsCacheInt8, device).ToArray2D();
+                var newValues = MatMulCachedBInference(inputTensor, _valueWeights, _valueWeightsCache, _valueWeightsCacheFp16, _valueWeightsCacheInt8, device).ToArray2D();
+
+                int pastLength = cache.Length;
+                cache.Append(newKeys, newValues);
+
+                var keysTensor = Neuraval.Tensor.Tensor.FromArray2D(cache.GetKeys(), device);
+                var valuesTensor = Neuraval.Tensor.Tensor.FromArray2D(cache.GetValues(), device);
+
+                var outputTensor = new Neuraval.Tensor.Tensor(new[] { newSeqLen, _embeddingDim }, device);
+                var headOutputs = new Neuraval.Tensor.Tensor[_numHeads];
+
+                Parallel.For(0, _numHeads, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, head =>
+                {
+                    int startIdx = head * _headDim;
+                    int endIdx = startIdx + _headDim;
+
+                    var headQueries = TensorOps.SliceColumns(newQueriesTensor, startIdx, endIdx);
+                    var headKeys = TensorOps.SliceColumns(keysTensor, startIdx, endIdx);
+                    var headValues = TensorOps.SliceColumns(valuesTensor, startIdx, endIdx);
+
+                    headOutputs[head] = IncrementalScaledDotProductAttention(headQueries, headKeys, headValues, pastLength, device);
+                });
+
+                for (int head = 0; head < _numHeads; head++)
+                {
+                    TensorOps.SetColumns(outputTensor, headOutputs[head], head * _headDim);
+                }
+
+                return MatMulCachedBInference(outputTensor, _outputWeights, _outputWeightsCache, _outputWeightsCacheFp16, _outputWeightsCacheInt8, device).ToArray2D();
+            }
+            catch (CudaException) when (device == DeviceType.Cuda)
+            {
+                TensorDeviceSelector.ReportFailure();
+                return ForwardIncremental(newInput, cache);
+            }
+            catch (AggregateException ex) when (device == DeviceType.Cuda && ex.InnerExceptions.Any(inner => inner is CudaException))
+            {
+                TensorDeviceSelector.ReportFailure();
+                return ForwardIncremental(newInput, cache);
+            }
+        }
+
+        private Neuraval.Tensor.Tensor IncrementalScaledDotProductAttention(
+            Neuraval.Tensor.Tensor queries, Neuraval.Tensor.Tensor keys, Neuraval.Tensor.Tensor values, int pastLength, DeviceType device)
+        {
+            float scaleMultiplier = 1.0f / MathF.Sqrt(_headDim);
+
+            return FlashAttentionOps.Attend(queries, keys, values, true, scaleMultiplier, pastLength);
+        }
+
+        public float QueryGradientAt(int i, int j) => _queryGradients[i, j];
+
+        public float KeyGradientAt(int i, int j) => _keyGradients[i, j];
+
+        public float ValueGradientAt(int i, int j) => _valueGradients[i, j];
+
+        public float OutputGradientAt(int i, int j) => _outputGradients[i, j];
 
         public float[,] Backward(float[,] gradOutput, float learningRate)
         {
@@ -305,89 +519,107 @@ namespace Neuraval.Core.Models
                 throw new InvalidOperationException("Forward must be called before Backward");
             }
 
+            var device = TensorDeviceSelector.Current;
+
+            try
+            {
+                return BackwardCore(gradOutput, device);
+            }
+            catch (CudaException) when (device == DeviceType.Cuda)
+            {
+                TensorDeviceSelector.ReportFailure();
+                return Backward(gradOutput, learningRate);
+            }
+            catch (AggregateException ex) when (device == DeviceType.Cuda && ex.InnerExceptions.Any(inner => inner is CudaException))
+            {
+                TensorDeviceSelector.ReportFailure();
+                return Backward(gradOutput, learningRate);
+            }
+        }
+
+        private float[,] BackwardCore(float[,] gradOutput, DeviceType device)
+        {
             int seqLen = gradOutput.GetLength(0);
             float scale = MathF.Sqrt(_headDim);
 
-            // FinalOutput = ConcatOutput @ Wo
-            var gradConcatOutput = Matematicas.MatrixMultiplyTransposeBAutoCached(gradOutput, _outputWeights, _outputWeightsCache);
-            var outputWeightsGrad = Matematicas.MatrixMultiplyTransposeAAuto(_lastConcatOutput, gradOutput);
-            Matematicas.ParallelMatrixAddInPlace(_accumulatedOutputGradients, outputWeightsGrad);
+            var gradOutputTensor = Neuraval.Tensor.Tensor.FromArray2D(gradOutput, device);
+            var concatOutputTensor = Neuraval.Tensor.Tensor.FromArray2D(_lastConcatOutput, device);
 
-            var gradQueryHeads = new float[_numHeads][,];
-            var gradKeyHeads = new float[_numHeads][,];
-            var gradValueHeads = new float[_numHeads][,];
+            var gradConcatOutputTensor = TensorOps.MatMulTransposeBCachedB(gradOutputTensor, _outputWeights, _outputWeightsCache);
+            if (_outputLora != null) TensorOps.AddInPlace(gradConcatOutputTensor, _outputLora.Backward(gradOutputTensor, device));
+            var outputWeightsGrad = TensorOps.MatMulTransposeA(concatOutputTensor, gradOutputTensor);
+
+            var queriesTensor = Neuraval.Tensor.Tensor.FromArray2D(_lastQueries, device);
+            var keysTensor = Neuraval.Tensor.Tensor.FromArray2D(_lastKeys, device);
+            var valuesTensor = Neuraval.Tensor.Tensor.FromArray2D(_lastValues, device);
+
+            var gradQueryHeads = new Neuraval.Tensor.Tensor[_numHeads];
+            var gradKeyHeads = new Neuraval.Tensor.Tensor[_numHeads];
+            var gradValueHeads = new Neuraval.Tensor.Tensor[_numHeads];
 
             Parallel.For(0, _numHeads, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, head =>
             {
                 int startIdx = head * _headDim;
                 int endIdx = startIdx + _headDim;
 
-                var headQueries = Matematicas.SequentialExtractColumns(_lastQueries, startIdx, endIdx);
-                var headKeys = Matematicas.SequentialExtractColumns(_lastKeys, startIdx, endIdx);
-                var headValues = Matematicas.SequentialExtractColumns(_lastValues, startIdx, endIdx);
-                var headGradOutput = Matematicas.SequentialExtractColumns(gradConcatOutput, startIdx, endIdx);
+                var headQueriesTensor = TensorOps.SliceColumns(queriesTensor, startIdx, endIdx);
+                var headKeysTensor = TensorOps.SliceColumns(keysTensor, startIdx, endIdx);
+                var headValuesTensor = TensorOps.SliceColumns(valuesTensor, startIdx, endIdx);
+                var headGradOutputTensor = TensorOps.SliceColumns(gradConcatOutputTensor, startIdx, endIdx);
 
-                var attentionWeights = new float[seqLen, seqLen];
-                for (int i = 0; i < seqLen; i++)
-                {
-                    for (int j = 0; j < seqLen; j++)
-                    {
-                        attentionWeights[i, j] = _lastAttentionWeights[head, i, j];
-                    }
-                }
+                // _lastAttentionWeights[head] ya es un bloque contiguo dentro del
+                // float[,,]; copiarlo directo al Buffer del tensor evita el paso
+                // intermedio por un float[,] + conversión elemento a elemento.
+                var attentionWeightsTensor = new Neuraval.Tensor.Tensor(new[] { seqLen, seqLen }, device);
+                System.Buffer.BlockCopy(_lastAttentionWeights, head * seqLen * seqLen * sizeof(float),
+                    attentionWeightsTensor.Buffer, 0, seqLen * seqLen * sizeof(float));
 
-                var gradValueHead = Matematicas.SequentialMatrixMultiply(Matematicas.SequentialTranspose(attentionWeights), headGradOutput);
-                var gradAttentionWeights = Matematicas.SequentialMatrixMultiply(headGradOutput, Matematicas.SequentialTranspose(headValues));
+                var gradValueHead = TensorOps.MatMulTransposeA(attentionWeightsTensor, headGradOutputTensor);
+                var gradAttentionWeights = TensorOps.MatMulTransposeB(headGradOutputTensor, headValuesTensor);
 
-                var gradScores = new float[seqLen, seqLen];
-                for (int i = 0; i < seqLen; i++)
-                {
-                    float dot = 0;
-                    for (int k = 0; k < seqLen; k++)
-                    {
-                        dot += attentionWeights[i, k] * gradAttentionWeights[i, k];
-                    }
-                    for (int j = 0; j < seqLen; j++)
-                    {
-                        gradScores[i, j] = attentionWeights[i, j] * (gradAttentionWeights[i, j] - dot);
-                    }
-                }
+                var gradScores = TensorOps.SoftmaxRowsBackward(gradAttentionWeights, attentionWeightsTensor);
+                var gradRawDot = TensorOps.Scale(gradScores, 1.0f / scale);
 
-                var gradRawDot = Matematicas.SequentialMatrixScale(gradScores, 1.0f / scale);
-
-                gradQueryHeads[head] = Matematicas.SequentialMatrixMultiply(gradRawDot, headKeys);
-                gradKeyHeads[head] = Matematicas.SequentialMatrixMultiply(Matematicas.SequentialTranspose(gradRawDot), headQueries);
+                gradQueryHeads[head] = TensorOps.MatMul(gradRawDot, headKeysTensor);
+                gradKeyHeads[head] = TensorOps.MatMulTransposeA(gradRawDot, headQueriesTensor);
                 gradValueHeads[head] = gradValueHead;
             });
 
-            var gradQueries = new float[seqLen, _embeddingDim];
-            var gradKeys = new float[seqLen, _embeddingDim];
-            var gradValues = new float[seqLen, _embeddingDim];
+            var gradQueriesTensor = new Neuraval.Tensor.Tensor(new[] { seqLen, _embeddingDim }, device);
+            var gradKeysTensor = new Neuraval.Tensor.Tensor(new[] { seqLen, _embeddingDim }, device);
+            var gradValuesTensor = new Neuraval.Tensor.Tensor(new[] { seqLen, _embeddingDim }, device);
 
             for (int head = 0; head < _numHeads; head++)
             {
                 int startIdx = head * _headDim;
-                Matematicas.SetColumns(gradQueries, gradQueryHeads[head], startIdx);
-                Matematicas.SetColumns(gradKeys, gradKeyHeads[head], startIdx);
-                Matematicas.SetColumns(gradValues, gradValueHeads[head], startIdx);
+                TensorOps.SetColumns(gradQueriesTensor, gradQueryHeads[head], startIdx);
+                TensorOps.SetColumns(gradKeysTensor, gradKeyHeads[head], startIdx);
+                TensorOps.SetColumns(gradValuesTensor, gradValueHeads[head], startIdx);
             }
 
-            var queryWeightsGrad = Matematicas.MatrixMultiplyTransposeAAuto(_lastInput, gradQueries);
-            var keyWeightsGrad = Matematicas.MatrixMultiplyTransposeAAuto(_lastInput, gradKeys);
-            var valueWeightsGrad = Matematicas.MatrixMultiplyTransposeAAuto(_lastInput, gradValues);
+            var inputTensor = Neuraval.Tensor.Tensor.FromArray2D(_lastInput, device);
 
-            Matematicas.ParallelMatrixAddInPlace(_accumulatedQueryGradients, queryWeightsGrad);
-            Matematicas.ParallelMatrixAddInPlace(_accumulatedKeyGradients, keyWeightsGrad);
-            Matematicas.ParallelMatrixAddInPlace(_accumulatedValueGradients, valueWeightsGrad);
+            var queryWeightsGrad = TensorOps.MatMulTransposeA(inputTensor, gradQueriesTensor);
+            var keyWeightsGrad = TensorOps.MatMulTransposeA(inputTensor, gradKeysTensor);
+            var valueWeightsGrad = TensorOps.MatMulTransposeA(inputTensor, gradValuesTensor);
 
-            var gradInputFromQuery = Matematicas.MatrixMultiplyTransposeBAutoCached(gradQueries, _queryWeights, _queryWeightsCache);
-            var gradInputFromKey = Matematicas.MatrixMultiplyTransposeBAutoCached(gradKeys, _keyWeights, _keyWeightsCache);
-            var gradInputFromValue = Matematicas.MatrixMultiplyTransposeBAutoCached(gradValues, _valueWeights, _valueWeightsCache);
+            var gradInputTensor = TensorOps.MatMulTransposeBCachedB(gradQueriesTensor, _queryWeights, _queryWeightsCache);
+            var gradInputFromKey = TensorOps.MatMulTransposeBCachedB(gradKeysTensor, _keyWeights, _keyWeightsCache);
+            var gradInputFromValue = TensorOps.MatMulTransposeBCachedB(gradValuesTensor, _valueWeights, _valueWeightsCache);
 
-            var gradInput = Matematicas.ParallelMatrixAdd(gradInputFromQuery, gradInputFromKey);
-            Matematicas.ParallelMatrixAddInPlace(gradInput, gradInputFromValue);
+            TensorOps.AddInPlace(gradInputTensor, gradInputFromKey);
+            TensorOps.AddInPlace(gradInputTensor, gradInputFromValue);
 
-            return gradInput;
+            if (_queryLora != null) TensorOps.AddInPlace(gradInputTensor, _queryLora.Backward(gradQueriesTensor, device));
+            if (_keyLora != null) TensorOps.AddInPlace(gradInputTensor, _keyLora.Backward(gradKeysTensor, device));
+            if (_valueLora != null) TensorOps.AddInPlace(gradInputTensor, _valueLora.Backward(gradValuesTensor, device));
+
+            TensorOps.AddInPlace(_accumulatedOutputGradients, outputWeightsGrad);
+            TensorOps.AddInPlace(_accumulatedQueryGradients, queryWeightsGrad);
+            TensorOps.AddInPlace(_accumulatedKeyGradients, keyWeightsGrad);
+            TensorOps.AddInPlace(_accumulatedValueGradients, valueWeightsGrad);
+
+            return gradInputTensor.ToArray2D();
         }
 
         public float[,,] ForwardBatch(float[,,] inputBatch, float[,]? mask = null)
@@ -401,46 +633,41 @@ namespace Neuraval.Core.Models
                 throw new ArgumentException($"Input embedding dimension {embDim} does not match expected {_embeddingDim}");
             }
 
-            var output = new float[batchSize, seqLen, _embeddingDim];
-            var inputBatchCache = new float[batchSize, seqLen, _embeddingDim];
+            var inputBatchTensor = Neuraval.Tensor.Tensor.FromArray3D(inputBatch);
+
+            var outputTensor = new Neuraval.Tensor.Tensor(new[] { batchSize, seqLen, _embeddingDim });
+            var inputBatchCacheTensor = new Neuraval.Tensor.Tensor(new[] { batchSize, seqLen, _embeddingDim });
+            var queriesBatchCacheTensor = new Neuraval.Tensor.Tensor(new[] { batchSize, seqLen, _embeddingDim });
+            var keysBatchCacheTensor = new Neuraval.Tensor.Tensor(new[] { batchSize, seqLen, _embeddingDim });
+            var valuesBatchCacheTensor = new Neuraval.Tensor.Tensor(new[] { batchSize, seqLen, _embeddingDim });
+            var concatOutputBatchCacheTensor = new Neuraval.Tensor.Tensor(new[] { batchSize, seqLen, _embeddingDim });
             var attentionWeightsBatchCache = new float[batchSize, _numHeads, seqLen, seqLen];
-            var queriesBatchCache = new float[batchSize, seqLen, _embeddingDim];
-            var keysBatchCache = new float[batchSize, seqLen, _embeddingDim];
-            var valuesBatchCache = new float[batchSize, seqLen, _embeddingDim];
-            var concatOutputBatchCache = new float[batchSize, seqLen, _embeddingDim];
 
             for (int b = 0; b < batchSize; b++)
             {
-                var itemInput = Matematicas.GetBatchSlice(inputBatch, b);
+                var itemInput = TensorOps.GetBatchSlice(inputBatchTensor, b).ToArray2D();
                 var itemOutput = Forward(itemInput, mask);
 
-                Matematicas.SetBatchSlice(output, b, itemOutput);
-                Matematicas.SetBatchSlice(inputBatchCache, b, _lastInput);
-                Matematicas.SetBatchSlice(queriesBatchCache, b, _lastQueries);
-                Matematicas.SetBatchSlice(keysBatchCache, b, _lastKeys);
-                Matematicas.SetBatchSlice(valuesBatchCache, b, _lastValues);
-                Matematicas.SetBatchSlice(concatOutputBatchCache, b, _lastConcatOutput);
+                TensorOps.SetBatchSlice(outputTensor, b, Neuraval.Tensor.Tensor.FromArray2D(itemOutput));
+                TensorOps.SetBatchSlice(inputBatchCacheTensor, b, Neuraval.Tensor.Tensor.FromArray2D(_lastInput));
+                TensorOps.SetBatchSlice(queriesBatchCacheTensor, b, Neuraval.Tensor.Tensor.FromArray2D(_lastQueries));
+                TensorOps.SetBatchSlice(keysBatchCacheTensor, b, Neuraval.Tensor.Tensor.FromArray2D(_lastKeys));
+                TensorOps.SetBatchSlice(valuesBatchCacheTensor, b, Neuraval.Tensor.Tensor.FromArray2D(_lastValues));
+                TensorOps.SetBatchSlice(concatOutputBatchCacheTensor, b, Neuraval.Tensor.Tensor.FromArray2D(_lastConcatOutput));
 
-                for (int head = 0; head < _numHeads; head++)
-                {
-                    for (int i = 0; i < seqLen; i++)
-                    {
-                        for (int j = 0; j < seqLen; j++)
-                        {
-                            attentionWeightsBatchCache[b, head, i, j] = _lastAttentionWeights[head, i, j];
-                        }
-                    }
-                }
+                int attnSlabSize = _numHeads * seqLen * seqLen;
+                System.Buffer.BlockCopy(_lastAttentionWeights, 0, attentionWeightsBatchCache,
+                    b * attnSlabSize * sizeof(float), attnSlabSize * sizeof(float));
             }
 
-            _lastInputBatch = inputBatchCache;
+            _lastInputBatch = inputBatchCacheTensor.ToArray3D();
             _lastAttentionWeightsBatch = attentionWeightsBatchCache;
-            _lastQueriesBatch = queriesBatchCache;
-            _lastKeysBatch = keysBatchCache;
-            _lastValuesBatch = valuesBatchCache;
-            _lastConcatOutputBatch = concatOutputBatchCache;
+            _lastQueriesBatch = queriesBatchCacheTensor.ToArray3D();
+            _lastKeysBatch = keysBatchCacheTensor.ToArray3D();
+            _lastValuesBatch = valuesBatchCacheTensor.ToArray3D();
+            _lastConcatOutputBatch = concatOutputBatchCacheTensor.ToArray3D();
 
-            return output;
+            return outputTensor.ToArray3D();
         }
 
         public float[,,] ForwardBatch(float[,,] inputBatch, float[,,]? maskBatch)
@@ -459,47 +686,43 @@ namespace Neuraval.Core.Models
                 throw new ArgumentException("maskBatch debe tener el mismo tama�o de batch que inputBatch");
             }
 
-            var output = new float[batchSize, seqLen, _embeddingDim];
-            var inputBatchCache = new float[batchSize, seqLen, _embeddingDim];
+            var inputBatchTensor = Neuraval.Tensor.Tensor.FromArray3D(inputBatch);
+            var maskBatchTensor = maskBatch != null ? Neuraval.Tensor.Tensor.FromArray3D(maskBatch) : null;
+
+            var outputTensor = new Neuraval.Tensor.Tensor(new[] { batchSize, seqLen, _embeddingDim });
+            var inputBatchCacheTensor = new Neuraval.Tensor.Tensor(new[] { batchSize, seqLen, _embeddingDim });
+            var queriesBatchCacheTensor = new Neuraval.Tensor.Tensor(new[] { batchSize, seqLen, _embeddingDim });
+            var keysBatchCacheTensor = new Neuraval.Tensor.Tensor(new[] { batchSize, seqLen, _embeddingDim });
+            var valuesBatchCacheTensor = new Neuraval.Tensor.Tensor(new[] { batchSize, seqLen, _embeddingDim });
+            var concatOutputBatchCacheTensor = new Neuraval.Tensor.Tensor(new[] { batchSize, seqLen, _embeddingDim });
             var attentionWeightsBatchCache = new float[batchSize, _numHeads, seqLen, seqLen];
-            var queriesBatchCache = new float[batchSize, seqLen, _embeddingDim];
-            var keysBatchCache = new float[batchSize, seqLen, _embeddingDim];
-            var valuesBatchCache = new float[batchSize, seqLen, _embeddingDim];
-            var concatOutputBatchCache = new float[batchSize, seqLen, _embeddingDim];
 
             for (int b = 0; b < batchSize; b++)
             {
-                var itemInput = Matematicas.GetBatchSlice(inputBatch, b);
-                var itemMask = maskBatch != null ? Matematicas.GetBatchSlice(maskBatch, b) : null;
+                var itemInput = TensorOps.GetBatchSlice(inputBatchTensor, b).ToArray2D();
+                var itemMask = maskBatchTensor != null ? TensorOps.GetBatchSlice(maskBatchTensor, b).ToArray2D() : null;
                 var itemOutput = Forward(itemInput, itemMask);
 
-                Matematicas.SetBatchSlice(output, b, itemOutput);
-                Matematicas.SetBatchSlice(inputBatchCache, b, _lastInput);
-                Matematicas.SetBatchSlice(queriesBatchCache, b, _lastQueries);
-                Matematicas.SetBatchSlice(keysBatchCache, b, _lastKeys);
-                Matematicas.SetBatchSlice(valuesBatchCache, b, _lastValues);
-                Matematicas.SetBatchSlice(concatOutputBatchCache, b, _lastConcatOutput);
+                TensorOps.SetBatchSlice(outputTensor, b, Neuraval.Tensor.Tensor.FromArray2D(itemOutput));
+                TensorOps.SetBatchSlice(inputBatchCacheTensor, b, Neuraval.Tensor.Tensor.FromArray2D(_lastInput));
+                TensorOps.SetBatchSlice(queriesBatchCacheTensor, b, Neuraval.Tensor.Tensor.FromArray2D(_lastQueries));
+                TensorOps.SetBatchSlice(keysBatchCacheTensor, b, Neuraval.Tensor.Tensor.FromArray2D(_lastKeys));
+                TensorOps.SetBatchSlice(valuesBatchCacheTensor, b, Neuraval.Tensor.Tensor.FromArray2D(_lastValues));
+                TensorOps.SetBatchSlice(concatOutputBatchCacheTensor, b, Neuraval.Tensor.Tensor.FromArray2D(_lastConcatOutput));
 
-                for (int head = 0; head < _numHeads; head++)
-                {
-                    for (int i = 0; i < seqLen; i++)
-                    {
-                        for (int j = 0; j < seqLen; j++)
-                        {
-                            attentionWeightsBatchCache[b, head, i, j] = _lastAttentionWeights[head, i, j];
-                        }
-                    }
-                }
+                int attnSlabSize = _numHeads * seqLen * seqLen;
+                System.Buffer.BlockCopy(_lastAttentionWeights, 0, attentionWeightsBatchCache,
+                    b * attnSlabSize * sizeof(float), attnSlabSize * sizeof(float));
             }
 
-            _lastInputBatch = inputBatchCache;
+            _lastInputBatch = inputBatchCacheTensor.ToArray3D();
             _lastAttentionWeightsBatch = attentionWeightsBatchCache;
-            _lastQueriesBatch = queriesBatchCache;
-            _lastKeysBatch = keysBatchCache;
-            _lastValuesBatch = valuesBatchCache;
-            _lastConcatOutputBatch = concatOutputBatchCache;
+            _lastQueriesBatch = queriesBatchCacheTensor.ToArray3D();
+            _lastKeysBatch = keysBatchCacheTensor.ToArray3D();
+            _lastValuesBatch = valuesBatchCacheTensor.ToArray3D();
+            _lastConcatOutputBatch = concatOutputBatchCacheTensor.ToArray3D();
 
-            return output;
+            return outputTensor.ToArray3D();
         }
 
         public float[,,] BackwardBatch(float[,,] gradOutputBatch, float learningRate)
@@ -513,66 +736,89 @@ namespace Neuraval.Core.Models
             int batchSize = gradOutputBatch.GetLength(0);
             int seqLen = gradOutputBatch.GetLength(1);
 
-            var gradInput = new float[batchSize, seqLen, _embeddingDim];
+            var lastInputBatchTensor = Neuraval.Tensor.Tensor.FromArray3D(_lastInputBatch);
+            var lastQueriesBatchTensor = Neuraval.Tensor.Tensor.FromArray3D(_lastQueriesBatch);
+            var lastKeysBatchTensor = Neuraval.Tensor.Tensor.FromArray3D(_lastKeysBatch);
+            var lastValuesBatchTensor = Neuraval.Tensor.Tensor.FromArray3D(_lastValuesBatch);
+            var lastConcatOutputBatchTensor = Neuraval.Tensor.Tensor.FromArray3D(_lastConcatOutputBatch);
+            var gradOutputBatchTensor = Neuraval.Tensor.Tensor.FromArray3D(gradOutputBatch);
+
+            var gradInputTensor = new Neuraval.Tensor.Tensor(new[] { batchSize, seqLen, _embeddingDim });
 
             for (int b = 0; b < batchSize; b++)
             {
-                _lastInput = Matematicas.GetBatchSlice(_lastInputBatch, b);
-                _lastQueries = Matematicas.GetBatchSlice(_lastQueriesBatch, b);
-                _lastKeys = Matematicas.GetBatchSlice(_lastKeysBatch, b);
-                _lastValues = Matematicas.GetBatchSlice(_lastValuesBatch, b);
-                _lastConcatOutput = Matematicas.GetBatchSlice(_lastConcatOutputBatch, b);
+                _lastInput = TensorOps.GetBatchSlice(lastInputBatchTensor, b).ToArray2D();
+                _lastQueries = TensorOps.GetBatchSlice(lastQueriesBatchTensor, b).ToArray2D();
+                _lastKeys = TensorOps.GetBatchSlice(lastKeysBatchTensor, b).ToArray2D();
+                _lastValues = TensorOps.GetBatchSlice(lastValuesBatchTensor, b).ToArray2D();
+                _lastConcatOutput = TensorOps.GetBatchSlice(lastConcatOutputBatchTensor, b).ToArray2D();
 
                 var attentionWeightsItem = new float[_numHeads, seqLen, seqLen];
-                for (int head = 0; head < _numHeads; head++)
-                {
-                    for (int i = 0; i < seqLen; i++)
-                    {
-                        for (int j = 0; j < seqLen; j++)
-                        {
-                            attentionWeightsItem[head, i, j] = _lastAttentionWeightsBatch[b, head, i, j];
-                        }
-                    }
-                }
+                int attnSlabSize = _numHeads * seqLen * seqLen;
+                System.Buffer.BlockCopy(_lastAttentionWeightsBatch, b * attnSlabSize * sizeof(float),
+                    attentionWeightsItem, 0, attnSlabSize * sizeof(float));
                 _lastAttentionWeights = attentionWeightsItem;
 
-                var itemGradOutput = Matematicas.GetBatchSlice(gradOutputBatch, b);
+                var itemGradOutput = TensorOps.GetBatchSlice(gradOutputBatchTensor, b).ToArray2D();
                 var itemGradInput = Backward(itemGradOutput, learningRate);
 
-                Matematicas.SetBatchSlice(gradInput, b, itemGradInput);
+                TensorOps.SetBatchSlice(gradInputTensor, b, Neuraval.Tensor.Tensor.FromArray2D(itemGradInput));
             }
 
-            return gradInput;
+            return gradInputTensor.ToArray3D();
         }
 
         public void UpdateWeights(float learningRate)
         {
-            _queryOptimizer.Update(_queryWeights, _queryGradients, learningRate);
-            _keyOptimizer.Update(_keyWeights, _keyGradients, learningRate);
-            _valueOptimizer.Update(_valueWeights, _valueGradients, learningRate);
-            _outputOptimizer.Update(_outputWeights, _outputGradients, learningRate);
+            if (!_freezeBaseWeights)
+            {
+                _queryOptimizer.Update(_queryWeights, _queryGradients.ToArray2D(), learningRate);
+                _keyOptimizer.Update(_keyWeights, _keyGradients.ToArray2D(), learningRate);
+                _valueOptimizer.Update(_valueWeights, _valueGradients.ToArray2D(), learningRate);
+                _outputOptimizer.Update(_outputWeights, _outputGradients.ToArray2D(), learningRate);
 
-            _queryWeightsCache.Invalidate();
-            _keyWeightsCache.Invalidate();
-            _valueWeightsCache.Invalidate();
-            _outputWeightsCache.Invalidate();
+                _queryWeightsCache.Invalidate();
+                _keyWeightsCache.Invalidate();
+                _valueWeightsCache.Invalidate();
+                _outputWeightsCache.Invalidate();
 
-            Matematicas.ParallelClearMatrix(_queryGradients);
-            Matematicas.ParallelClearMatrix(_keyGradients);
-            Matematicas.ParallelClearMatrix(_valueGradients);
-            Matematicas.ParallelClearMatrix(_outputGradients);
+                _queryWeightsCacheFp16.Invalidate();
+                _keyWeightsCacheFp16.Invalidate();
+                _valueWeightsCacheFp16.Invalidate();
+                _outputWeightsCacheFp16.Invalidate();
+
+                _queryWeightsCacheInt8.Invalidate();
+                _keyWeightsCacheInt8.Invalidate();
+                _valueWeightsCacheInt8.Invalidate();
+                _outputWeightsCacheInt8.Invalidate();
+            }
+
+            _queryLora?.UpdateWeights(learningRate);
+            _keyLora?.UpdateWeights(learningRate);
+            _valueLora?.UpdateWeights(learningRate);
+            _outputLora?.UpdateWeights(learningRate);
+
+            TensorOps.Clear(_queryGradients);
+            TensorOps.Clear(_keyGradients);
+            TensorOps.Clear(_valueGradients);
+            TensorOps.Clear(_outputGradients);
         }
 
         public void ResetGradients()
         {
-            Matematicas.ParallelClearMatrix(_queryGradients);
-            Matematicas.ParallelClearMatrix(_keyGradients);
-            Matematicas.ParallelClearMatrix(_valueGradients);
-            Matematicas.ParallelClearMatrix(_outputGradients);
-            Matematicas.ParallelClearMatrix(_accumulatedQueryGradients);
-            Matematicas.ParallelClearMatrix(_accumulatedKeyGradients);
-            Matematicas.ParallelClearMatrix(_accumulatedValueGradients);
-            Matematicas.ParallelClearMatrix(_accumulatedOutputGradients);
+            TensorOps.Clear(_queryGradients);
+            TensorOps.Clear(_keyGradients);
+            TensorOps.Clear(_valueGradients);
+            TensorOps.Clear(_outputGradients);
+            TensorOps.Clear(_accumulatedQueryGradients);
+            TensorOps.Clear(_accumulatedKeyGradients);
+            TensorOps.Clear(_accumulatedValueGradients);
+            TensorOps.Clear(_accumulatedOutputGradients);
+
+            _queryLora?.ResetGradients();
+            _keyLora?.ResetGradients();
+            _valueLora?.ResetGradients();
+            _outputLora?.ResetGradients();
         }
 
         public MultiHeadAttentionState SaveState()
@@ -588,7 +834,8 @@ namespace Neuraval.Core.Models
                 QueryOptimizerState = _queryOptimizer.SaveState(),
                 KeyOptimizerState = _keyOptimizer.SaveState(),
                 ValueOptimizerState = _valueOptimizer.SaveState(),
-                OutputOptimizerState = _outputOptimizer.SaveState()
+                OutputOptimizerState = _outputOptimizer.SaveState(),
+                LoraState = SaveLoraState()
             };
         }
 
@@ -597,15 +844,10 @@ namespace Neuraval.Core.Models
             int rows = matrix.GetLength(0);
             int cols = matrix.GetLength(1);
             var result = new float[rows * cols];
-            int index = 0;
 
-            for (int i = 0; i < rows; i++)
-            {
-                for (int j = 0; j < cols; j++)
-                {
-                    result[index++] = matrix[i, j];
-                }
-            }
+            // float[,] rectangular es contiguo row-major: aplanar es un memcpy
+            // puro, sin aritmética, no una copia elemento a elemento.
+            System.Buffer.BlockCopy(matrix, 0, result, 0, result.Length * sizeof(float));
 
             return result;
         }
@@ -629,21 +871,29 @@ namespace Neuraval.Core.Models
             attention._valueWeightsCache.Invalidate();
             attention._outputWeightsCache.Invalidate();
 
+            attention._queryWeightsCacheFp16.Invalidate();
+            attention._keyWeightsCacheFp16.Invalidate();
+            attention._valueWeightsCacheFp16.Invalidate();
+            attention._outputWeightsCacheFp16.Invalidate();
+
+            attention._queryWeightsCacheInt8.Invalidate();
+            attention._keyWeightsCacheInt8.Invalidate();
+            attention._valueWeightsCacheInt8.Invalidate();
+            attention._outputWeightsCacheInt8.Invalidate();
+
+            if (state.LoraState != null)
+            {
+                attention.LoadLoraState(state.LoraState);
+            }
+
             return attention;
         }
 
         private static float[,] UnflattenMatrix(float[] array, int rows, int cols)
         {
             var matrix = new float[rows, cols];
-            int index = 0;
 
-            for (int i = 0; i < rows; i++)
-            {
-                for (int j = 0; j < cols; j++)
-                {
-                    matrix[i, j] = array[index++];
-                }
-            }
+            System.Buffer.BlockCopy(array, 0, matrix, 0, array.Length * sizeof(float));
 
             return matrix;
         }
@@ -661,6 +911,8 @@ namespace Neuraval.Core.Models
         public AdamMatrixOptimizerState? KeyOptimizerState { get; set; }
         public AdamMatrixOptimizerState? ValueOptimizerState { get; set; }
         public AdamMatrixOptimizerState? OutputOptimizerState { get; set; }
+
+        public LoraAttentionState? LoraState { get; set; }
 
         public MultiHeadAttentionState()
         {

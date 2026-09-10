@@ -1,9 +1,12 @@
 ﻿using Neuraval.Abstractions;
 using Neuraval.ChatBot.Services;
 using Neuraval.Core.Models;
+using Neuraval.Core.Quantization;
+using Neuraval.Core.Serialization;
 using Neuraval.Core.Services;
 using Neuraval.Core.Utils;
 using Neuraval.Cuda;
+using Neuraval.Tensor;
 using System.Diagnostics;
 using System.Linq;
 
@@ -17,6 +20,12 @@ namespace Neuraval.CLI
 
             bool forceContinueTraining = args.Any(a => string.Equals(a, "--continue", StringComparison.OrdinalIgnoreCase));
 
+            if (args.Any(a => string.Equals(a, "--int8-inference", StringComparison.OrdinalIgnoreCase)))
+            {
+                Int8InferenceSettings.Enable();
+                Console.WriteLine("Inferencia INT8 en CPU habilitada (Fase 5.4.2, experimental — medí con --int8-benchmark).");
+            }
+
             if (args.Length > 0 && args[0] == "--benchmark")
             {
                 RunTrainingBenchmark();
@@ -29,6 +38,18 @@ namespace Neuraval.CLI
                 return;
             }
 
+            if (args.Length > 0 && args[0] == "--benchmark-suite")
+            {
+                RunBenchmarkSuite();
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--memory-profile")
+            {
+                RunMemoryProfile();
+                return;
+            }
+
             if (args.Length > 0 && args[0] == "--convert")
             {
                 RunConvert(args);
@@ -38,6 +59,30 @@ namespace Neuraval.CLI
             if (args.Length > 0 && args[0] == "--convert-all")
             {
                 RunConvertAll(args);
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--quantize")
+            {
+                RunQuantize(args);
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--export-lora")
+            {
+                RunExportLora(args);
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--import-lora")
+            {
+                RunImportLora(args);
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--int8-benchmark")
+            {
+                RunInt8Benchmark(args);
                 return;
             }
 
@@ -165,7 +210,7 @@ Asistente: el resultado es cuatro");
                         .ToList();
 
                     Console.WriteLine("Construyendo vocabulario...");
-                    chatBot.BuildVocabularyFromTexts(allTexts, minFrequency: 1, maxVocabSize: 10000);
+                    chatBot.BuildVocabularyFromTexts(allTexts, minFrequency: 1, maxVocabSize: settings.VocabSize);
                     Console.WriteLine($"Tamaño del vocabulario: {chatBot.GetVocabularySize()}");
                     Console.WriteLine();
                 }
@@ -174,6 +219,8 @@ Asistente: el resultado es cuatro");
                     Console.WriteLine($"Continuando con el vocabulario existente del checkpoint (tamaño: {chatBot.GetVocabularySize()}).");
                     Console.WriteLine();
                 }
+
+                ApplyLoraSettingsIfRequested(chatBot, settings);
 
                 using (var monitor = new SystemMonitor())
                 {
@@ -378,6 +425,297 @@ Asistente: el resultado es cuatro");
             catch (Exception ex)
             {
                 Console.WriteLine($"Error al convertir {jsonPath}: {ex.Message}");
+            }
+        }
+
+        static void RunInt8Benchmark(string[] args)
+        {
+            // Por defecto usa las dimensiones del preset "medium" de 5.2,
+            // que es un tamaño representativo de proyección de atención
+            // (embeddingDim x embeddingDim). Se pueden pasar dimensiones
+            // propias: --int8-benchmark <embeddingDim> <seqLen> <iteraciones>
+            int embeddingDim = args.Length > 1 && int.TryParse(args[1], out var d) ? d : 512;
+            int seqLen = args.Length > 2 && int.TryParse(args[2], out var s) ? s : 512;
+            int iterations = args.Length > 3 && int.TryParse(args[3], out var it) ? it : 20;
+
+            Console.WriteLine("=== Benchmark matmul CPU: FP32 (SIMD existente) vs INT8 (Fase 5.4.2) ===");
+            Console.WriteLine($"embeddingDim={embeddingDim}, seqLen={seqLen}, iteraciones={iterations}");
+            Console.WriteLine();
+
+            var random = new Random(42);
+            var weights = new float[embeddingDim, embeddingDim];
+            for (int i = 0; i < embeddingDim; i++)
+            {
+                for (int j = 0; j < embeddingDim; j++)
+                {
+                    weights[i, j] = (float)(random.NextDouble() * 2.0 - 1.0);
+                }
+            }
+
+            var inputArr = new float[seqLen, embeddingDim];
+            for (int i = 0; i < seqLen; i++)
+            {
+                for (int j = 0; j < embeddingDim; j++)
+                {
+                    inputArr[i, j] = (float)(random.NextDouble() * 2.0 - 1.0);
+                }
+            }
+
+            var inputTensor = Neuraval.Tensor.Tensor.FromArray2D(inputArr, DeviceType.Cpu);
+            var fp32Cache = new CudaWeightCache(embeddingDim, embeddingDim);
+            var int8Cache = new Int8WeightCache(embeddingDim, embeddingDim);
+
+            // Un llamado de precalentamiento de cada uno (JIT warm-up), fuera de la medición.
+            var fp32Warmup = TensorOps.MatMulCachedB(inputTensor, weights, fp32Cache);
+            var int8Warmup = Int8MatMul.MatMulCachedB(inputTensor, weights, int8Cache);
+
+            var (maxError, meanError) = Int8Quantizer.ComputeQuantizationError(fp32Warmup.Buffer, int8Warmup.Buffer);
+
+            var swFp32 = Stopwatch.StartNew();
+            for (int i = 0; i < iterations; i++)
+            {
+                TensorOps.MatMulCachedB(inputTensor, weights, fp32Cache);
+            }
+            swFp32.Stop();
+
+            var swInt8 = Stopwatch.StartNew();
+            for (int i = 0; i < iterations; i++)
+            {
+                Int8MatMul.MatMulCachedB(inputTensor, weights, int8Cache);
+            }
+            swInt8.Stop();
+
+            double fp32MsPerCall = swFp32.Elapsed.TotalMilliseconds / iterations;
+            double int8MsPerCall = swInt8.Elapsed.TotalMilliseconds / iterations;
+            double speedup = fp32MsPerCall / int8MsPerCall;
+
+            long fp32Bytes = (long)embeddingDim * embeddingDim * sizeof(float);
+            long int8Bytes = (long)embeddingDim * embeddingDim * sizeof(sbyte) + embeddingDim * sizeof(float);
+
+            Console.WriteLine($"FP32 (backend SIMD existente): {fp32MsPerCall:F3} ms/llamada");
+            Console.WriteLine($"INT8 (kernel escalar 5.4.2):   {int8MsPerCall:F3} ms/llamada");
+            Console.WriteLine($"Relación de velocidad INT8/FP32: {speedup:F2}x ({(speedup >= 1.0 ? "más rápido" : "más lento")})");
+            Console.WriteLine();
+            Console.WriteLine($"Peso en memoria por matriz — FP32: {fp32Bytes / 1024.0:F1} KB, INT8: {int8Bytes / 1024.0:F1} KB " +
+                $"({(1.0 - (double)int8Bytes / fp32Bytes) * 100.0:F1}% menos)");
+            Console.WriteLine($"Error de cuantización en la salida — máximo: {maxError:F6}, promedio: {meanError:F6}");
+            Console.WriteLine();
+            Console.WriteLine("Si INT8 no resultó más rápido en esta máquina, dejalo deshabilitado " +
+                "(es el valor por defecto): el ahorro garantizado de esta fase es memoria, no velocidad.");
+        }
+
+        static void RunQuantize(string[] args)
+        {
+            if (args.Length < 3)
+            {
+                Console.WriteLine("Uso: dotnet run --project Neuraval.CLI -- --quantize <modelo.navm> <modelo-int8.navm>");
+                return;
+            }
+
+            string inputPath = args[1];
+            string outputPath = args[2];
+
+            if (!File.Exists(inputPath))
+            {
+                Console.WriteLine($"No se encontró el archivo: {inputPath}");
+                return;
+            }
+
+            try
+            {
+                Console.WriteLine($"Cargando modelo: {inputPath}");
+                var (modelState, header) = ModelBinarySerializer.Load(inputPath);
+
+                if (header.Quantized)
+                {
+                    Console.WriteLine("El modelo de entrada ya está cuantizado en INT8; no hay nada que hacer.");
+                    return;
+                }
+
+                if (!header.IsTrained)
+                {
+                    Console.WriteLine("Advertencia: el modelo no figura como entrenado (IsTrained=false). Se cuantiza igual.");
+                }
+
+                // Diagnóstico: error de cuantización sobre la matriz más
+                // grande (embeddings, compartida con la proyección de
+                // salida por weight tying), que es la que más pesa y la más
+                // representativa del impacto en precisión.
+                var embeddings = modelState.EmbeddingState.Embeddings;
+                var quantizedEmbeddings = Int8Quantizer.QuantizeRowSymmetric(
+                    embeddings, modelState.EmbeddingState.VocabSize, modelState.EmbeddingState.EmbeddingDim);
+                var dequantizedEmbeddings = Int8Quantizer.Dequantize(quantizedEmbeddings);
+                var (maxError, meanError) = Int8Quantizer.ComputeQuantizationError(embeddings, dequantizedEmbeddings);
+
+                long originalSize = new FileInfo(inputPath).Length;
+
+                Console.WriteLine($"Cuantizando y guardando: {outputPath}");
+                ModelBinarySerializer.SaveQuantized(outputPath, modelState, header);
+
+                long quantizedSize = new FileInfo(outputPath).Length;
+                double reductionPercent = originalSize > 0
+                    ? (1.0 - (double)quantizedSize / originalSize) * 100.0
+                    : 0.0;
+
+                Console.WriteLine();
+                Console.WriteLine("=== Cuantización INT8 completada ===");
+                Console.WriteLine($"Tamaño original:    {originalSize / 1024.0 / 1024.0:F2} MB");
+                Console.WriteLine($"Tamaño cuantizado:  {quantizedSize / 1024.0 / 1024.0:F2} MB");
+                Console.WriteLine($"Reducción:          {reductionPercent:F1}%");
+                Console.WriteLine($"Error cuantización (embeddings) — máximo: {maxError:F6}, promedio: {meanError:F6}");
+                Console.WriteLine();
+                Console.WriteLine("El archivo cuantizado es solo para inferencia (no conserva estado de optimizadores).");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error al cuantizar {inputPath}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Habilita LoRA sobre el modelo del <paramref name="chatBot"/> si
+        /// <see cref="TrainingSettings.LoraRank"/> &gt; 0. Es un no-op si el
+        /// modelo ya trae LoRA habilitado (por ejemplo, porque se cargó desde
+        /// un checkpoint que ya lo tenía).
+        /// </summary>
+        static void ApplyLoraSettingsIfRequested(TransformerChatBotService chatBot, TrainingSettings settings)
+        {
+            if (settings.LoraRank <= 0)
+            {
+                return;
+            }
+
+            var model = chatBot.GetModel();
+            if (model == null)
+            {
+                Console.WriteLine("Advertencia: se pidió LoRA pero el modelo todavía no está inicializado.");
+                return;
+            }
+
+            if (model.HasLora)
+            {
+                Console.WriteLine("El modelo ya tiene LoRA habilitado (viene del checkpoint); se continúa con los adaptadores existentes.");
+                Console.WriteLine();
+                return;
+            }
+
+            model.EnableLora(settings.LoraRank, (float)settings.LoraAlpha, freezeBase: true);
+
+            Console.WriteLine($"LoRA habilitado: rank={settings.LoraRank}, alpha={settings.LoraAlpha}.");
+            Console.WriteLine("La base del modelo quedó congelada; solo se van a entrenar los adaptadores A/B de atención.");
+            Console.WriteLine();
+        }
+
+        static void RunExportLora(string[] args)
+        {
+            if (args.Length < 3)
+            {
+                Console.WriteLine("Uso: dotnet run --project Neuraval.CLI -- --export-lora <modelo.navm> <adaptador.navlora>");
+                return;
+            }
+
+            string modelPath = args[1];
+            string loraOutputPath = args[2];
+
+            if (!File.Exists(modelPath))
+            {
+                Console.WriteLine($"No se encontró el archivo: {modelPath}");
+                return;
+            }
+
+            try
+            {
+                Console.WriteLine($"Cargando modelo: {modelPath}");
+                var (modelState, _) = ModelBinarySerializer.Load(modelPath);
+                var model = TransformerModel.LoadState(modelState);
+
+                var loraState = model.SaveLoraState();
+                if (loraState == null)
+                {
+                    Console.WriteLine("El modelo no tiene adaptadores LoRA habilitados; no hay nada que exportar.");
+                    Console.WriteLine("(¿Se entrenó con --lora-rank?)");
+                    return;
+                }
+
+                Console.WriteLine($"Exportando adaptador LoRA: {loraOutputPath}");
+                LoraBinarySerializer.Save(loraOutputPath, loraState);
+
+                long loraSize = new FileInfo(loraOutputPath).Length;
+                long modelSize = new FileInfo(modelPath).Length;
+
+                Console.WriteLine();
+                Console.WriteLine("=== Exportación de adaptador LoRA completada ===");
+                Console.WriteLine($"Modelo base:        {modelSize / 1024.0 / 1024.0:F2} MB");
+                Console.WriteLine($"Adaptador LoRA:     {loraSize / 1024.0 / 1024.0:F2} MB");
+                Console.WriteLine($"Rank: {loraState.BlockStates[0].Query.Rank}, Alpha: {loraState.BlockStates[0].Query.Alpha}, Capas: {loraState.NumLayers}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error al exportar LoRA desde {modelPath}: {ex.Message}");
+            }
+        }
+
+        static void RunImportLora(string[] args)
+        {
+            if (args.Length < 4)
+            {
+                Console.WriteLine("Uso: dotnet run --project Neuraval.CLI -- --import-lora <modelo-base.navm> <adaptador.navlora> <modelo-salida.navm>");
+                return;
+            }
+
+            string basePath = args[1];
+            string loraPath = args[2];
+            string outputPath = args[3];
+
+            if (!File.Exists(basePath))
+            {
+                Console.WriteLine($"No se encontró el archivo: {basePath}");
+                return;
+            }
+
+            if (!File.Exists(loraPath))
+            {
+                Console.WriteLine($"No se encontró el archivo: {loraPath}");
+                return;
+            }
+
+            try
+            {
+                Console.WriteLine($"Cargando modelo base: {basePath}");
+                var (modelState, header) = ModelBinarySerializer.Load(basePath);
+
+                if (header.Quantized)
+                {
+                    Console.WriteLine("El modelo base está cuantizado en INT8; importar LoRA requiere el .navm sin cuantizar (con estado de optimizadores).");
+                    return;
+                }
+
+                var model = TransformerModel.LoadState(modelState);
+
+                Console.WriteLine($"Cargando adaptador LoRA: {loraPath}");
+                var (loraState, loraHeader) = LoraBinarySerializer.Load(loraPath);
+
+                if (loraHeader.EmbeddingDim != header.EmbeddingDim || loraHeader.NumLayers != header.NumLayers)
+                {
+                    Console.WriteLine(
+                        $"El adaptador ({loraHeader.NumLayers} capas, embeddingDim={loraHeader.EmbeddingDim}) " +
+                        $"no es compatible con el modelo base ({header.NumLayers} capas, embeddingDim={header.EmbeddingDim}).");
+                    return;
+                }
+
+                model.LoadLoraState(loraState);
+
+                var mergedState = model.SaveState();
+                Console.WriteLine($"Guardando modelo con LoRA importado: {outputPath}");
+                ModelBinarySerializer.Save(outputPath, mergedState, header);
+
+                Console.WriteLine();
+                Console.WriteLine("=== Importación de adaptador LoRA completada ===");
+                Console.WriteLine($"Rank: {loraHeader.Rank}, Alpha: {loraHeader.Alpha}, Base congelada: {loraHeader.FreezeNonLoraWeights}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error al importar LoRA hacia {basePath}: {ex.Message}");
             }
         }
 
@@ -687,6 +1025,147 @@ Asistente: el resultado es cuatro");
             PrintGpuBenchmarkResults(results);
         }
 
+        private sealed class SuiteBenchRow
+        {
+            public string Operation { get; init; } = "";
+            public string Shape { get; init; } = "";
+            public double SequentialMs { get; init; }
+            public double ParallelMs { get; init; }
+            public double? CudaMs { get; init; }
+        }
+
+        static void RunBenchmarkSuite()
+        {
+            Console.WriteLine("===========================================");
+            Console.WriteLine("   Suite de benchmarks (Fase 1, item 18)");
+            Console.WriteLine("===========================================");
+            Console.WriteLine();
+
+            bool gpuAvailable = Matematicas.IsGpuAvailable() && Matematicas.TryEnableGpu();
+            Console.WriteLine(gpuAvailable ? "GPU CUDA detectada y activada." : "GPU CUDA no disponible: sólo se medirá CPU.");
+            Console.WriteLine();
+
+            var rng = new Random(2026);
+            var rows = new List<SuiteBenchRow>();
+
+            double Time(Action action, int iterations = 5)
+            {
+                action();
+                GC.Collect();
+                var sw = Stopwatch.StartNew();
+                for (int i = 0; i < iterations; i++)
+                {
+                    action();
+                }
+                sw.Stop();
+                return sw.Elapsed.TotalMilliseconds / iterations;
+            }
+
+            double? TimeCuda(Action action, int iterations = 5)
+            {
+                if (!gpuAvailable) return null;
+                try
+                {
+                    return Time(action, iterations);
+                }
+                catch (CudaException)
+                {
+                    return null;
+                }
+            }
+
+            int[] matMulSizes = { 128, 512, 1024 };
+            foreach (int size in matMulSizes)
+            {
+                var a = RandomMatrix(size, size, rng);
+                var b = RandomMatrix(size, size, rng);
+                int iterations = size >= 1024 ? 2 : 5;
+
+                double seqMs = Time(() => Matematicas.SequentialMatrixMultiply(a, b), iterations);
+                double parMs = Time(() => Matematicas.ParallelMatrixMultiply(a, b), iterations);
+                double? cudaMs = TimeCuda(() => CudaMath.MatrixMultiply(a, b), iterations);
+
+                rows.Add(new SuiteBenchRow { Operation = "MatMul", Shape = $"{size}x{size}", SequentialMs = seqMs, ParallelMs = parMs, CudaMs = cudaMs });
+            }
+
+            int[] softmaxSizes = { 128, 512, 1024 };
+            foreach (int size in softmaxSizes)
+            {
+                var input = RandomMatrix(size, size, rng);
+
+                double seqMs = Time(() => Matematicas.SequentialSoftmax2D(input));
+                double parMs = Time(() => Matematicas.ParallelSoftmaxRows(input));
+                double? cudaMs = TimeCuda(() => CudaMath.SoftmaxRows(input));
+
+                rows.Add(new SuiteBenchRow { Operation = "Softmax", Shape = $"{size}x{size}", SequentialMs = seqMs, ParallelMs = parMs, CudaMs = cudaMs });
+            }
+
+            int[] layerNormDims = { 128, 512, 1024 };
+            foreach (int dim in layerNormDims)
+            {
+                int seqLen = 128;
+                var input = RandomMatrix(seqLen, dim, rng);
+                var gamma = RandomVector(dim, rng);
+                var beta = RandomVector(dim, rng);
+
+                double parMs = Time(() => Matematicas.ParallelLayerNormRows(input, gamma, beta, 1e-5f, out _, out _));
+                double? cudaMs = TimeCuda(() => CudaMath.LayerNormRows(input, gamma, beta, 1e-5f, out _, out _));
+
+                rows.Add(new SuiteBenchRow { Operation = "LayerNorm", Shape = $"{seqLen}x{dim}", SequentialMs = double.NaN, ParallelMs = parMs, CudaMs = cudaMs });
+            }
+
+            foreach (var (label, embeddingDim, numLayers, numHeads, feedforwardDim, seqLen) in new[]
+            {
+                ("Nano", 128, 2, 4, 512, 32),
+                ("Small", 256, 6, 8, 1024, 128),
+            })
+            {
+                var model = new TransformerModel(
+                    vocabSize: 1000,
+                    embeddingDim: embeddingDim,
+                    numLayers: numLayers,
+                    numHeads: numHeads,
+                    feedforwardDim: feedforwardDim,
+                    maxSequenceLength: seqLen,
+                    dropout: 0.0f,
+                    seed: 1);
+
+                var tokens = Enumerable.Range(0, seqLen).Select(i => i % 1000).ToArray();
+
+                double forwardMs = Time(() => model.Forward(tokens, training: false), iterations: 3);
+                rows.Add(new SuiteBenchRow { Operation = $"Transformer Forward ({label})", Shape = $"seq={seqLen}, dim={embeddingDim}, layers={numLayers}", SequentialMs = double.NaN, ParallelMs = forwardMs, CudaMs = null });
+
+                double trainStepMs = Time(() =>
+                {
+                    model.ZeroGradients();
+                    model.CalculateCausalLoss(tokens, lossStartIndex: 0);
+                    model.AverageGradients(1);
+                    model.ClipGradients(1.0f);
+                    model.UpdateWeights(0.001f);
+                }, iterations: 3);
+                rows.Add(new SuiteBenchRow { Operation = $"Transformer Training step ({label})", Shape = $"seq={seqLen}, dim={embeddingDim}, layers={numLayers}", SequentialMs = double.NaN, ParallelMs = trainStepMs, CudaMs = null });
+            }
+
+            PrintBenchmarkSuiteResults(rows);
+        }
+
+        static void PrintBenchmarkSuiteResults(List<SuiteBenchRow> rows)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"{"Operación",-30} {"Forma",-30} {"Secuencial (ms)",16} {"Paralelo (ms)",14} {"CUDA (ms)",10}");
+            Console.WriteLine(new string('-', 106));
+
+            foreach (var r in rows)
+            {
+                string seqStr = double.IsNaN(r.SequentialMs) ? "n/a" : r.SequentialMs.ToString("F3");
+                string cudaStr = r.CudaMs.HasValue ? r.CudaMs.Value.ToString("F3") : "n/a";
+
+                Console.WriteLine($"{r.Operation,-30} {r.Shape,-30} {seqStr,16} {r.ParallelMs,14:F3} {cudaStr,10}");
+            }
+
+            Console.WriteLine();
+        }
+
         static float[,] RandomMatrix(int rows, int cols, Random rng)
         {
             var m = new float[rows, cols];
@@ -708,6 +1187,128 @@ Asistente: el resultado es cuatro");
                 v[i] = (float)(rng.NextDouble() * 2.0 - 1.0);
             }
             return v;
+        }
+
+        static void RunMemoryProfile()
+        {
+            Console.WriteLine("===========================================");
+            Console.WriteLine("   Memory profiling (Fase 1, item 4)");
+            Console.WriteLine("===========================================");
+            Console.WriteLine();
+
+            int vocabSize = 1000;
+
+            foreach (var (label, embeddingDim, numLayers, numHeads, feedforwardDim, seqLen) in new[]
+            {
+                ("Nano", 128, 2, 4, 512, 32),
+                ("Small", 256, 6, 8, 1024, 128),
+            })
+            {
+                var report = MemoryProfiler.Analyze(
+                    vocabSize: vocabSize,
+                    embeddingDim: embeddingDim,
+                    numLayers: numLayers,
+                    numHeads: numHeads,
+                    feedforwardDim: feedforwardDim,
+                    batchSize: 1,
+                    sequenceLength: seqLen);
+
+                PrintMemoryReport(label, report);
+                RunEmpiricalMemoryMeasurement(label, vocabSize, embeddingDim, numLayers, numHeads, feedforwardDim, seqLen);
+            }
+        }
+
+        static void PrintMemoryReport(string label, ModelMemoryReport report)
+        {
+            Console.WriteLine($"--- {label} (estimación teórica) ---");
+            Console.WriteLine($"{"Componente",-26} {"Parámetros",14} {"Pesos",10} {"Gradientes",12} {"Optimizer",10} {"Total",10}");
+            Console.WriteLine(new string('-', 88));
+
+            foreach (var component in report.Parameters)
+            {
+                Console.WriteLine($"{component.Name,-26} {component.ParameterCount,14:N0} {MemoryProfiler.FormatBytes(component.WeightsBytes),10} {MemoryProfiler.FormatBytes(component.GradientBytes),12} {MemoryProfiler.FormatBytes(component.OptimizerStateBytes),10} {MemoryProfiler.FormatBytes(component.TotalBytes),10}");
+            }
+
+            Console.WriteLine(new string('-', 88));
+            Console.WriteLine($"{"Total parámetros",-26} {report.TotalParameterCount,14:N0} {MemoryProfiler.FormatBytes(report.TotalWeightsBytes),10} {MemoryProfiler.FormatBytes(report.TotalGradientBytes),12} {MemoryProfiler.FormatBytes(report.TotalOptimizerStateBytes),10} {MemoryProfiler.FormatBytes(report.TotalParameterBytes),10}");
+            Console.WriteLine();
+
+            Console.WriteLine("Activaciones estimadas (batch=1):");
+            foreach (var activation in report.Activations)
+            {
+                Console.WriteLine($"  {activation.Name,-26} {activation.ElementCount,14:N0} {MemoryProfiler.FormatBytes(activation.Bytes),10}");
+            }
+            Console.WriteLine($"  {"Total activaciones",-26} {"",14} {"",10} {"",12} {"",10} {MemoryProfiler.FormatBytes(report.TotalActivationBytes),10}");
+            Console.WriteLine();
+
+            double adamRatio = report.TotalWeightsBytes > 0
+                ? (double)(report.TotalWeightsBytes + report.TotalOptimizerStateBytes) / report.TotalWeightsBytes
+                : 0;
+            double fullRatio = report.TotalWeightsBytes > 0
+                ? (double)report.TotalParameterBytes / report.TotalWeightsBytes
+                : 0;
+
+            Console.WriteLine($"Regla teórica de Adam (pesos + m + v): {adamRatio:F1}x el tamaño de los pesos");
+            Console.WriteLine($"Consumo real en Neuraval (pesos + gradientes + accumulated + m + v): {fullRatio:F1}x el tamaño de los pesos");
+            Console.WriteLine($"Total estimado (parámetros + activaciones): {MemoryProfiler.FormatBytes(report.GrandTotalBytes)}");
+            Console.WriteLine();
+        }
+
+        static void RunEmpiricalMemoryMeasurement(
+            string label,
+            int vocabSize,
+            int embeddingDim,
+            int numLayers,
+            int numHeads,
+            int feedforwardDim,
+            int seqLen)
+        {
+            Console.WriteLine($"--- {label} (medido en runtime con GC.GetTotalMemory) ---");
+
+            long beforeConstruct = ForceCollectAndMeasure();
+
+            var model = new TransformerModel(
+                vocabSize: vocabSize,
+                embeddingDim: embeddingDim,
+                numLayers: numLayers,
+                numHeads: numHeads,
+                feedforwardDim: feedforwardDim,
+                maxSequenceLength: seqLen,
+                dropout: 0.0f,
+                seed: 1);
+
+            long afterConstruct = ForceCollectAndMeasure();
+
+            var tokens = Enumerable.Range(0, seqLen).Select(i => i % vocabSize).ToArray();
+
+            model.Forward(tokens, training: true);
+            long afterForward = ForceCollectAndMeasure();
+
+            model.ZeroGradients();
+            model.CalculateCausalLoss(tokens, lossStartIndex: 0);
+            model.AverageGradients(1);
+            model.ClipGradients(1.0f);
+            long afterBackward = ForceCollectAndMeasure();
+
+            model.UpdateWeights(0.001f);
+            long afterUpdate = ForceCollectAndMeasure();
+
+            Console.WriteLine($"  Construcción del modelo (pesos+gradientes+optimizer): {MemoryProfiler.FormatBytes(afterConstruct - beforeConstruct)}");
+            Console.WriteLine($"  Forward (activaciones):                              {MemoryProfiler.FormatBytes(afterForward - afterConstruct)}");
+            Console.WriteLine($"  Backward + clipping (buffers temporales):            {MemoryProfiler.FormatBytes(afterBackward - afterForward)}");
+            Console.WriteLine($"  Update de pesos:                                     {MemoryProfiler.FormatBytes(afterUpdate - afterBackward)}");
+            Console.WriteLine($"  Total acumulado tras un paso completo:               {MemoryProfiler.FormatBytes(afterUpdate - beforeConstruct)}");
+            Console.WriteLine();
+
+            GC.KeepAlive(model);
+        }
+
+        static long ForceCollectAndMeasure()
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            return GC.GetTotalMemory(true);
         }
 
         static void PrintGpuBenchmarkResults(List<GpuBenchResult> results)

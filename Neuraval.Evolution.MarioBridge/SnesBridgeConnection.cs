@@ -175,6 +175,7 @@ namespace Neuraval.Evolution.MarioBridge
         private void AcceptNext()
         {
             _client = _listener.AcceptTcpClient();
+            _client.NoDelay = true;
             _stream = _client.GetStream();
             _stream.ReadTimeout = ReceiveTimeoutMs;
             _pending.Clear();

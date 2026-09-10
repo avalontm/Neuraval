@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using Neuraval.Core.Utils;
 using Neuraval.Cuda;
+using Neuraval.Tensor;
 
 namespace Neuraval.Core.Models
 {
@@ -112,102 +113,43 @@ namespace Neuraval.Core.Models
 
             float scale = 1.0f / batchSize;
 
-            Parallel.For(0, _embeddingDim, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, i =>
-            {
-                for (int j = 0; j < _hiddenDim; j++)
-                {
-                    _gradients1[i, j] = _accumulatedGradients1[i, j] * scale;
-                }
-            });
-
-            Parallel.For(0, _hiddenDim, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, i =>
-            {
-                _biasGradients1[i] = _accumulatedBiasGradients1[i] * scale;
-                for (int j = 0; j < _embeddingDim; j++)
-                {
-                    _gradients2[i, j] = _accumulatedGradients2[i, j] * scale;
-                }
-            });
-
-            Parallel.For(0, _embeddingDim, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, i =>
-            {
-                _biasGradients2[i] = _accumulatedBiasGradients2[i] * scale;
-            });
+            _gradients1 = TensorOps.Scale(Neuraval.Tensor.Tensor.FromArray2D(_accumulatedGradients1), scale).ToArray2D();
+            _gradients2 = TensorOps.Scale(Neuraval.Tensor.Tensor.FromArray2D(_accumulatedGradients2), scale).ToArray2D();
+            _biasGradients1 = TensorOps.Scale(Neuraval.Tensor.Tensor.FromArray1D(_accumulatedBiasGradients1), scale).ToArray1D();
+            _biasGradients2 = TensorOps.Scale(Neuraval.Tensor.Tensor.FromArray1D(_accumulatedBiasGradients2), scale).ToArray1D();
         }
 
-        public void ClipGradients(float maxNorm)
+        public float Gradient1At(int i, int j) => _gradients1[i, j];
+
+        public float BiasGradient1At(int i) => _biasGradients1[i];
+
+        public float Gradient2At(int i, int j) => _gradients2[i, j];
+
+        public float BiasGradient2At(int i) => _biasGradients2[i];
+
+        public float SumSquaredGradients()
         {
-            float totalNorm = 0;
-            object lockObj = new object();
+            float total = 0f;
 
-            Parallel.For(0, _embeddingDim, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, () => 0.0f, (i, loop, partial) =>
-            {
-                for (int j = 0; j < _hiddenDim; j++)
-                {
-                    partial += _gradients1[i, j] * _gradients1[i, j];
-                }
-                return partial;
-            }, partial =>
-            {
-                lock (lockObj)
-                {
-                    totalNorm += partial;
-                }
-            });
+            total += SumSquared(Neuraval.Tensor.Tensor.FromArray2D(_gradients1));
+            total += SumSquared(Neuraval.Tensor.Tensor.FromArray1D(_biasGradients1));
+            total += SumSquared(Neuraval.Tensor.Tensor.FromArray2D(_gradients2));
+            total += SumSquared(Neuraval.Tensor.Tensor.FromArray1D(_biasGradients2));
 
-            for (int i = 0; i < _hiddenDim; i++)
-            {
-                totalNorm += _biasGradients1[i] * _biasGradients1[i];
-            }
+            return total;
+        }
 
-            Parallel.For(0, _hiddenDim, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, () => 0.0f, (i, loop, partial) =>
-            {
-                for (int j = 0; j < _embeddingDim; j++)
-                {
-                    partial += _gradients2[i, j] * _gradients2[i, j];
-                }
-                return partial;
-            }, partial =>
-            {
-                lock (lockObj)
-                {
-                    totalNorm += partial;
-                }
-            });
+        private static float SumSquared(Neuraval.Tensor.Tensor tensor)
+        {
+            return TensorOps.Sum(TensorOps.Multiply(tensor, tensor));
+        }
 
-            for (int i = 0; i < _embeddingDim; i++)
-            {
-                totalNorm += _biasGradients2[i] * _biasGradients2[i];
-            }
-
-            totalNorm = MathF.Sqrt(totalNorm);
-
-            if (totalNorm > maxNorm)
-            {
-                float scale = maxNorm / (totalNorm + 1e-10f);
-
-                Parallel.For(0, _embeddingDim, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, i =>
-                {
-                    for (int j = 0; j < _hiddenDim; j++)
-                    {
-                        _gradients1[i, j] *= scale;
-                    }
-                });
-
-                Parallel.For(0, _hiddenDim, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, i =>
-                {
-                    _biasGradients1[i] *= scale;
-                    for (int j = 0; j < _embeddingDim; j++)
-                    {
-                        _gradients2[i, j] *= scale;
-                    }
-                });
-
-                Parallel.For(0, _embeddingDim, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, i =>
-                {
-                    _biasGradients2[i] *= scale;
-                });
-            }
+        public void ScaleGradients(float scale)
+        {
+            _gradients1 = TensorOps.Scale(Neuraval.Tensor.Tensor.FromArray2D(_gradients1), scale).ToArray2D();
+            _gradients2 = TensorOps.Scale(Neuraval.Tensor.Tensor.FromArray2D(_gradients2), scale).ToArray2D();
+            _biasGradients1 = TensorOps.Scale(Neuraval.Tensor.Tensor.FromArray1D(_biasGradients1), scale).ToArray1D();
+            _biasGradients2 = TensorOps.Scale(Neuraval.Tensor.Tensor.FromArray1D(_biasGradients2), scale).ToArray1D();
         }
 
         public float[,] Forward(float[,] input)
@@ -222,31 +164,48 @@ namespace Neuraval.Core.Models
 
             _lastInput = (float[,])input.Clone();
 
-            var preHidden = Matematicas.MatrixMultiplyAutoCached(input, _weights1, _weights1Cache);
-            var hidden = new float[seqLen, _hiddenDim];
+            var device = TensorDeviceSelector.Current;
+            var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() };
 
-            Parallel.For(0, seqLen, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, i =>
+            try
             {
-                for (int j = 0; j < _hiddenDim; j++)
+                var inputTensor = Neuraval.Tensor.Tensor.FromArray2D(input, device);
+
+                var preHidden = TensorOps.MatMulCachedB(inputTensor, _weights1, _weights1Cache);
+                var hiddenTensor = new Neuraval.Tensor.Tensor(new[] { seqLen, _hiddenDim }, device);
+
+                Parallel.For(0, seqLen, parallelOptions, i =>
                 {
-                    hidden[i, j] = ReLU(preHidden[i, j] + _bias1[j]);
-                }
-            });
+                    int rowOffset = i * _hiddenDim;
 
-            _lastHidden = hidden;
+                    for (int j = 0; j < _hiddenDim; j++)
+                    {
+                        hiddenTensor.Buffer[rowOffset + j] = ReLU(preHidden.Buffer[rowOffset + j] + _bias1[j]);
+                    }
+                });
 
-            var preOutput = Matematicas.MatrixMultiplyAutoCached(hidden, _weights2, _weights2Cache);
-            var output = new float[seqLen, _embeddingDim];
+                _lastHidden = hiddenTensor.ToArray2D();
 
-            Parallel.For(0, seqLen, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, i =>
+                var preOutput = TensorOps.MatMulCachedB(hiddenTensor, _weights2, _weights2Cache);
+                var outputTensor = new Neuraval.Tensor.Tensor(new[] { seqLen, _embeddingDim }, device);
+
+                Parallel.For(0, seqLen, parallelOptions, i =>
+                {
+                    int rowOffset = i * _embeddingDim;
+
+                    for (int j = 0; j < _embeddingDim; j++)
+                    {
+                        outputTensor.Buffer[rowOffset + j] = preOutput.Buffer[rowOffset + j] + _bias2[j];
+                    }
+                });
+
+                return outputTensor.ToArray2D();
+            }
+            catch (CudaException) when (device == DeviceType.Cuda)
             {
-                for (int j = 0; j < _embeddingDim; j++)
-                {
-                    output[i, j] = preOutput[i, j] + _bias2[j];
-                }
-            });
-
-            return output;
+                TensorDeviceSelector.ReportFailure();
+                return Forward(input);
+            }
         }
 
         private float ReLU(float x)
@@ -254,56 +213,53 @@ namespace Neuraval.Core.Models
             return MathF.Max(0, x);
         }
 
-        private float ReLUDerivative(float x)
-        {
-            return x > 0 ? 1.0f : 0.0f;
-        }
-
         public float[,] Backward(float[,] gradOutput, float learningRate)
         {
-            int seqLen = gradOutput.GetLength(0);
-            var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() };
+            return BackwardCore(gradOutput, _lastInput, _lastHidden);
+        }
 
-            var gradHiddenPre = Matematicas.MatrixMultiplyTransposeBAutoCached(gradOutput, _weights2, _weights2Cache);
-            var gradHidden = new float[seqLen, _hiddenDim];
+        private float[,] BackwardCore(float[,] gradOutput, float[,] input, float[,] hidden)
+        {
+            var device = TensorDeviceSelector.Current;
 
-            Parallel.For(0, seqLen, parallelOptions, i =>
+            try
             {
-                for (int j = 0; j < _hiddenDim; j++)
-                {
-                    gradHidden[i, j] = gradHiddenPre[i, j] * ReLUDerivative(_lastHidden[i, j]);
-                }
-            });
+                var gradOutputTensor = Neuraval.Tensor.Tensor.FromArray2D(gradOutput, device);
+                var hiddenTensor = Neuraval.Tensor.Tensor.FromArray2D(hidden, device);
+                var inputTensor = Neuraval.Tensor.Tensor.FromArray2D(input, device);
 
-            var grad2 = Matematicas.MatrixMultiplyTransposeAAuto(_lastHidden, gradOutput);
-            Matematicas.ParallelMatrixAddInPlace(_accumulatedGradients2, grad2);
+                var gradHiddenPre = TensorOps.MatMulTransposeBCachedB(gradOutputTensor, _weights2, _weights2Cache);
+                var gradHiddenTensor = TensorOps.ReLUBackward(gradHiddenPre, hiddenTensor);
 
-            Parallel.For(0, _embeddingDim, parallelOptions, i =>
+                var grad2 = TensorOps.MatMulTransposeA(hiddenTensor, gradOutputTensor);
+                var biasGrad2 = TensorOps.SumRows(gradOutputTensor);
+
+                var gradInputTensor = TensorOps.MatMulTransposeBCachedB(gradHiddenTensor, _weights1, _weights1Cache);
+
+                var grad1 = TensorOps.MatMulTransposeA(inputTensor, gradHiddenTensor);
+                var biasGrad1 = TensorOps.SumRows(gradHiddenTensor);
+
+                Matematicas.ParallelMatrixAddInPlace(_accumulatedGradients2, grad2.ToArray2D());
+                AccumulateVector(_accumulatedBiasGradients2, biasGrad2.ToArray1D());
+
+                Matematicas.ParallelMatrixAddInPlace(_accumulatedGradients1, grad1.ToArray2D());
+                AccumulateVector(_accumulatedBiasGradients1, biasGrad1.ToArray1D());
+
+                return gradInputTensor.ToArray2D();
+            }
+            catch (CudaException) when (device == DeviceType.Cuda)
             {
-                float sum = _accumulatedBiasGradients2[i];
-                for (int j = 0; j < seqLen; j++)
-                {
-                    sum += gradOutput[j, i];
-                }
-                _accumulatedBiasGradients2[i] = sum;
-            });
+                TensorDeviceSelector.ReportFailure();
+                return BackwardCore(gradOutput, input, hidden);
+            }
+        }
 
-            var gradInput = Matematicas.MatrixMultiplyTransposeBAutoCached(gradHidden, _weights1, _weights1Cache);
-
-            var grad1 = Matematicas.MatrixMultiplyTransposeAAuto(_lastInput, gradHidden);
-            Matematicas.ParallelMatrixAddInPlace(_accumulatedGradients1, grad1);
-
-            Parallel.For(0, _hiddenDim, parallelOptions, i =>
+        private static void AccumulateVector(float[] target, float[] source)
+        {
+            for (int i = 0; i < target.Length; i++)
             {
-                float sum = _accumulatedBiasGradients1[i];
-                for (int j = 0; j < seqLen; j++)
-                {
-                    sum += gradHidden[j, i];
-                }
-                _accumulatedBiasGradients1[i] = sum;
-            });
-
-            return gradInput;
+                target[i] += source[i];
+            }
         }
 
         public float[,,] ForwardBatch(float[,,] inputBatch)
@@ -320,42 +276,64 @@ namespace Neuraval.Core.Models
             _lastInputBatch = (float[,,])inputBatch.Clone();
 
             var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() };
-
+            var device = TensorDeviceSelector.Current;
             var flatInput = FlattenBatch(inputBatch);
-            var preHiddenFlat = Matematicas.MatrixMultiplyAutoCached(flatInput, _weights1, _weights1Cache);
 
-            var hidden = new float[batchSize, seqLen, _hiddenDim];
-
-            Parallel.For(0, batchSize * seqLen, parallelOptions, flatIndex =>
+            try
             {
-                int b = flatIndex / seqLen;
-                int i = flatIndex % seqLen;
+                var inputTensor = Neuraval.Tensor.Tensor.FromArray2D(flatInput, device);
 
-                for (int j = 0; j < _hiddenDim; j++)
+                var preHidden = TensorOps.MatMulCachedB(inputTensor, _weights1, _weights1Cache);
+                var hiddenFlat = new Neuraval.Tensor.Tensor(new[] { batchSize * seqLen, _hiddenDim }, device);
+
+                Parallel.For(0, batchSize * seqLen, parallelOptions, flatIndex =>
                 {
-                    hidden[b, i, j] = ReLU(preHiddenFlat[flatIndex, j] + _bias1[j]);
-                }
-            });
+                    int rowOffset = flatIndex * _hiddenDim;
 
-            _lastHiddenBatch = hidden;
+                    for (int j = 0; j < _hiddenDim; j++)
+                    {
+                        hiddenFlat.Buffer[rowOffset + j] = ReLU(preHidden.Buffer[rowOffset + j] + _bias1[j]);
+                    }
+                });
 
-            var flatHidden = FlattenBatch(hidden);
-            var preOutputFlat = Matematicas.MatrixMultiplyAutoCached(flatHidden, _weights2, _weights2Cache);
+                var hidden = new float[batchSize, seqLen, _hiddenDim];
 
-            var output = new float[batchSize, seqLen, _embeddingDim];
+                Parallel.For(0, batchSize * seqLen, parallelOptions, flatIndex =>
+                {
+                    int b = flatIndex / seqLen;
+                    int i = flatIndex % seqLen;
+                    int rowOffset = flatIndex * _hiddenDim;
 
-            Parallel.For(0, batchSize * seqLen, parallelOptions, flatIndex =>
+                    for (int j = 0; j < _hiddenDim; j++)
+                    {
+                        hidden[b, i, j] = hiddenFlat.Buffer[rowOffset + j];
+                    }
+                });
+
+                _lastHiddenBatch = hidden;
+
+                var preOutput = TensorOps.MatMulCachedB(hiddenFlat, _weights2, _weights2Cache);
+                var output = new float[batchSize, seqLen, _embeddingDim];
+
+                Parallel.For(0, batchSize * seqLen, parallelOptions, flatIndex =>
+                {
+                    int b = flatIndex / seqLen;
+                    int i = flatIndex % seqLen;
+                    int rowOffset = flatIndex * _embeddingDim;
+
+                    for (int j = 0; j < _embeddingDim; j++)
+                    {
+                        output[b, i, j] = preOutput.Buffer[rowOffset + j] + _bias2[j];
+                    }
+                });
+
+                return output;
+            }
+            catch (CudaException) when (device == DeviceType.Cuda)
             {
-                int b = flatIndex / seqLen;
-                int i = flatIndex % seqLen;
-
-                for (int j = 0; j < _embeddingDim; j++)
-                {
-                    output[b, i, j] = preOutputFlat[flatIndex, j] + _bias2[j];
-                }
-            });
-
-            return output;
+                TensorDeviceSelector.ReportFailure();
+                return ForwardBatch(inputBatch);
+            }
         }
 
         private static float[,] FlattenBatch(float[,,] batch)
@@ -365,16 +343,11 @@ namespace Neuraval.Core.Models
             int dim = batch.GetLength(2);
             var flat = new float[batchSize * seqLen, dim];
 
-            Parallel.For(0, batchSize * seqLen, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, flatIndex =>
-            {
-                int b = flatIndex / seqLen;
-                int i = flatIndex % seqLen;
-
-                for (int j = 0; j < dim; j++)
-                {
-                    flat[flatIndex, j] = batch[b, i, j];
-                }
-            });
+            // batch[b, i, j] y flat[b*seqLen + i, j] comparten el mismo layout
+            // row-major contiguo: aplanar es un único memcpy (mismo caso ya
+            // corregido en TransformerModel.FlattenBatch; esta era una copia
+            // separada del mismo método que había quedado sin migrar).
+            System.Buffer.BlockCopy(batch, 0, flat, 0, batchSize * seqLen * dim * sizeof(float));
 
             return flat;
         }
@@ -384,78 +357,21 @@ namespace Neuraval.Core.Models
             if (_lastInputBatch == null || _lastHiddenBatch == null)
                 throw new InvalidOperationException("ForwardBatch must be called before BackwardBatch");
 
-            var lastInputBatch = _lastInputBatch;
-            var lastHiddenBatch = _lastHiddenBatch;
-
             int batchSize = gradOutputBatch.GetLength(0);
             int seqLen = gradOutputBatch.GetLength(1);
-            var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() };
 
             var flatGradOutput = FlattenBatch(gradOutputBatch);
-            var gradHiddenPreFlat = Matematicas.MatrixMultiplyTransposeBAutoCached(flatGradOutput, _weights2, _weights2Cache);
+            var flatInput = FlattenBatch(_lastInputBatch);
+            var flatHidden = FlattenBatch(_lastHiddenBatch);
 
-            var gradHidden = new float[batchSize, seqLen, _hiddenDim];
-
-            Parallel.For(0, batchSize * seqLen, parallelOptions, flatIndex =>
-            {
-                int b = flatIndex / seqLen;
-                int i = flatIndex % seqLen;
-
-                for (int j = 0; j < _hiddenDim; j++)
-                {
-                    gradHidden[b, i, j] = gradHiddenPreFlat[flatIndex, j] * ReLUDerivative(lastHiddenBatch[b, i, j]);
-                }
-            });
-
-            var flatHidden = FlattenBatch(lastHiddenBatch);
-            var grad2 = Matematicas.MatrixMultiplyTransposeAAuto(flatHidden, flatGradOutput);
-            Matematicas.ParallelMatrixAddInPlace(_accumulatedGradients2, grad2);
-
-            Parallel.For(0, _embeddingDim, parallelOptions, i =>
-            {
-                float sum = _accumulatedBiasGradients2[i];
-                for (int b = 0; b < batchSize; b++)
-                {
-                    for (int j = 0; j < seqLen; j++)
-                    {
-                        sum += gradOutputBatch[b, j, i];
-                    }
-                }
-                _accumulatedBiasGradients2[i] = sum;
-            });
-
-            var flatGradHidden = FlattenBatch(gradHidden);
-            var gradInputFlat = Matematicas.MatrixMultiplyTransposeBAutoCached(flatGradHidden, _weights1, _weights1Cache);
+            var flatGradInput = BackwardCore(flatGradOutput, flatInput, flatHidden);
 
             var gradInput = new float[batchSize, seqLen, _embeddingDim];
 
-            Parallel.For(0, batchSize * seqLen, parallelOptions, flatIndex =>
-            {
-                int b = flatIndex / seqLen;
-                int i = flatIndex % seqLen;
-
-                for (int j = 0; j < _embeddingDim; j++)
-                {
-                    gradInput[b, i, j] = gradInputFlat[flatIndex, j];
-                }
-            });
-
-            var flatInput = FlattenBatch(lastInputBatch);
-            var grad1 = Matematicas.MatrixMultiplyTransposeAAuto(flatInput, flatGradHidden);
-            Matematicas.ParallelMatrixAddInPlace(_accumulatedGradients1, grad1);
-
-            Parallel.For(0, _hiddenDim, parallelOptions, i =>
-            {
-                float sum = _accumulatedBiasGradients1[i];
-                for (int b = 0; b < batchSize; b++)
-                {
-                    for (int j = 0; j < seqLen; j++)
-                    {
-                        sum += gradHidden[b, j, i];
-                    }
-                }
-                _accumulatedBiasGradients1[i] = sum;
-            });
+            // flatGradInput[b*seqLen + i, j] y gradInput[b, i, j] comparten el
+            // mismo layout row-major contiguo: un único memcpy, no una copia
+            // elemento a elemento (mismo caso que FlattenBatch arriba).
+            System.Buffer.BlockCopy(flatGradInput, 0, gradInput, 0, batchSize * seqLen * _embeddingDim * sizeof(float));
 
             return gradInput;
         }
@@ -510,15 +426,8 @@ namespace Neuraval.Core.Models
             int rows = matrix.GetLength(0);
             int cols = matrix.GetLength(1);
             var result = new float[rows * cols];
-            int index = 0;
 
-            for (int i = 0; i < rows; i++)
-            {
-                for (int j = 0; j < cols; j++)
-                {
-                    result[index++] = matrix[i, j];
-                }
-            }
+            System.Buffer.BlockCopy(matrix, 0, result, 0, result.Length * sizeof(float));
 
             return result;
         }
@@ -546,15 +455,8 @@ namespace Neuraval.Core.Models
         private static float[,] UnflattenMatrix(float[] array, int rows, int cols)
         {
             var matrix = new float[rows, cols];
-            int index = 0;
 
-            for (int i = 0; i < rows; i++)
-            {
-                for (int j = 0; j < cols; j++)
-                {
-                    matrix[i, j] = array[index++];
-                }
-            }
+            System.Buffer.BlockCopy(array, 0, matrix, 0, array.Length * sizeof(float));
 
             return matrix;
         }

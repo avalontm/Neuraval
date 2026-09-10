@@ -63,24 +63,42 @@ namespace Neuraval.Evolution.Neat
                 Connections.Select(connection => connection.Clone()).ToList());
         }
 
-        public float[] Evaluate(float[] inputs)
-        {
-            var values = new Dictionary<int, float>();
+        private List<int>? _cachedOrder;
+        private Dictionary<int, NeatNodeGene>? _cachedNodesById;
+        private Dictionary<int, List<NeatConnectionGene>>? _cachedIncoming;
+        private bool _structureDirty = true;
 
-            for (var i = 0; i < InputCount; i++)
+        private void InvalidateStructureCache()
+        {
+            _structureDirty = true;
+        }
+
+        private void EnsureStructureCache()
+        {
+            if (!_structureDirty && _cachedOrder != null)
             {
-                values[i] = inputs[i];
+                return;
             }
 
-            values[InputCount] = 1f;
+            var nodesById = new Dictionary<int, NeatNodeGene>(Nodes.Count);
+            var adjacency = new Dictionary<int, List<int>>(Nodes.Count);
+
+            foreach (var node in Nodes)
+            {
+                nodesById[node.Id] = node;
+                adjacency[node.Id] = new List<int>();
+            }
 
             var incoming = new Dictionary<int, List<NeatConnectionGene>>();
+
             foreach (var connection in Connections)
             {
                 if (!connection.Enabled)
                 {
                     continue;
                 }
+
+                adjacency[connection.InNode].Add(connection.OutNode);
 
                 if (!incoming.TryGetValue(connection.OutNode, out var list))
                 {
@@ -91,9 +109,53 @@ namespace Neuraval.Evolution.Neat
                 list.Add(connection);
             }
 
-            foreach (var nodeId in TopologicalOrder())
+            var visited = new HashSet<int>();
+            var order = new List<int>(Nodes.Count);
+
+            void Visit(int nodeId)
             {
-                var node = Nodes.First(candidate => candidate.Id == nodeId);
+                if (!visited.Add(nodeId))
+                {
+                    return;
+                }
+
+                foreach (var next in adjacency[nodeId])
+                {
+                    Visit(next);
+                }
+
+                order.Add(nodeId);
+            }
+
+            foreach (var node in Nodes)
+            {
+                Visit(node.Id);
+            }
+
+            order.Reverse();
+
+            _cachedNodesById = nodesById;
+            _cachedIncoming = incoming;
+            _cachedOrder = order;
+            _structureDirty = false;
+        }
+
+        public float[] Evaluate(float[] inputs)
+        {
+            EnsureStructureCache();
+
+            var values = new Dictionary<int, float>(_cachedOrder!.Count);
+
+            for (var i = 0; i < InputCount; i++)
+            {
+                values[i] = inputs[i];
+            }
+
+            values[InputCount] = 1f;
+
+            foreach (var nodeId in _cachedOrder)
+            {
+                var node = _cachedNodesById![nodeId];
 
                 if (node.Type == NeatNodeType.Input || node.Type == NeatNodeType.Bias)
                 {
@@ -102,7 +164,7 @@ namespace Neuraval.Evolution.Neat
 
                 var sum = 0f;
 
-                if (incoming.TryGetValue(nodeId, out var connectionsIn))
+                if (_cachedIncoming!.TryGetValue(nodeId, out var connectionsIn))
                 {
                     foreach (var connection in connectionsIn)
                     {
@@ -131,45 +193,6 @@ namespace Neuraval.Evolution.Neat
         private static float Sigmoid(float value)
         {
             return 1f / (1f + MathF.Exp(-value));
-        }
-
-        private List<int> TopologicalOrder()
-        {
-            var adjacency = Nodes.ToDictionary(node => node.Id, _ => new List<int>());
-
-            foreach (var connection in Connections)
-            {
-                if (connection.Enabled)
-                {
-                    adjacency[connection.InNode].Add(connection.OutNode);
-                }
-            }
-
-            var visited = new HashSet<int>();
-            var order = new List<int>();
-
-            void Visit(int nodeId)
-            {
-                if (!visited.Add(nodeId))
-                {
-                    return;
-                }
-
-                foreach (var next in adjacency[nodeId])
-                {
-                    Visit(next);
-                }
-
-                order.Add(nodeId);
-            }
-
-            foreach (var node in Nodes)
-            {
-                Visit(node.Id);
-            }
-
-            order.Reverse();
-            return order;
         }
 
         public void MutateWeights(Random random, float perturbRate, float perturbStrength, float resetRate)
@@ -224,6 +247,7 @@ namespace Neuraval.Evolution.Neat
                 var innovation = tracker.GetOrCreateConnectionInnovation(a.Id, b.Id);
                 var weight = random.NextSingle() * 2f - 1f;
                 Connections.Add(new NeatConnectionGene(a.Id, b.Id, weight, true, innovation));
+                InvalidateStructureCache();
                 return true;
             }
 
@@ -247,6 +271,7 @@ namespace Neuraval.Evolution.Neat
             Nodes.Add(new NeatNodeGene(nodeId, NeatNodeType.Hidden));
             Connections.Add(new NeatConnectionGene(target.InNode, nodeId, 1f, true, innovationIn));
             Connections.Add(new NeatConnectionGene(nodeId, target.OutNode, target.Weight, true, innovationOut));
+            InvalidateStructureCache();
         }
 
         private bool CreatesCycle(int fromId, int toId)

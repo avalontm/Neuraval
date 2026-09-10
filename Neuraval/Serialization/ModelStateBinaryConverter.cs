@@ -24,7 +24,7 @@ namespace Neuraval.Core.Serialization
         // Helper: arreglos de floats
         // ---------------------------------------------------------------
 
-        private static void WriteFloatArray(BinaryWriter writer, float[] array)
+        internal static void WriteFloatArray(BinaryWriter writer, float[] array)
         {
             writer.Write(array.Length);
             if (array.Length == 0) return;
@@ -34,7 +34,7 @@ namespace Neuraval.Core.Serialization
             writer.Write(bytes);
         }
 
-        private static float[] ReadFloatArray(BinaryReader reader)
+        internal static float[] ReadFloatArray(BinaryReader reader)
         {
             int length = reader.ReadInt32();
             if (length == 0) return Array.Empty<float>();
@@ -146,7 +146,7 @@ namespace Neuraval.Core.Serialization
         // LayerNormalizationState
         // ---------------------------------------------------------------
 
-        private static void WriteLayerNormalizationState(BinaryWriter writer, LayerNormalizationState state)
+        internal static void WriteLayerNormalizationState(BinaryWriter writer, LayerNormalizationState state)
         {
             writer.Write(state.NormalizedShape);
             writer.Write(state.Epsilon);
@@ -156,7 +156,7 @@ namespace Neuraval.Core.Serialization
             WriteOptionalAdamVectorOptimizerState(writer, state.BetaOptimizerState);
         }
 
-        private static LayerNormalizationState ReadLayerNormalizationState(BinaryReader reader)
+        internal static LayerNormalizationState ReadLayerNormalizationState(BinaryReader reader)
         {
             return new LayerNormalizationState
             {
@@ -166,6 +166,58 @@ namespace Neuraval.Core.Serialization
                 Beta = ReadFloatArray(reader),
                 GammaOptimizerState = ReadOptionalAdamVectorOptimizerState(reader),
                 BetaOptimizerState = ReadOptionalAdamVectorOptimizerState(reader)
+            };
+        }
+
+        // ---------------------------------------------------------------
+        // LoraProjectionState / LoraAttentionState (Fase 5.5)
+        // ---------------------------------------------------------------
+
+        internal static void WriteLoraProjectionState(BinaryWriter writer, LoraProjectionState state)
+        {
+            writer.Write(state.InDim);
+            writer.Write(state.OutDim);
+            writer.Write(state.Rank);
+            writer.Write(state.Alpha);
+            WriteFloatArray(writer, state.MatrixA);
+            WriteFloatArray(writer, state.MatrixB);
+            WriteOptionalAdamMatrixOptimizerState(writer, state.OptimizerAState);
+            WriteOptionalAdamMatrixOptimizerState(writer, state.OptimizerBState);
+        }
+
+        internal static LoraProjectionState ReadLoraProjectionState(BinaryReader reader)
+        {
+            return new LoraProjectionState
+            {
+                InDim = reader.ReadInt32(),
+                OutDim = reader.ReadInt32(),
+                Rank = reader.ReadInt32(),
+                Alpha = reader.ReadSingle(),
+                MatrixA = ReadFloatArray(reader),
+                MatrixB = ReadFloatArray(reader),
+                OptimizerAState = ReadOptionalAdamMatrixOptimizerState(reader),
+                OptimizerBState = ReadOptionalAdamMatrixOptimizerState(reader)
+            };
+        }
+
+        internal static void WriteLoraAttentionState(BinaryWriter writer, LoraAttentionState state)
+        {
+            WriteLoraProjectionState(writer, state.Query);
+            WriteLoraProjectionState(writer, state.Key);
+            WriteLoraProjectionState(writer, state.Value);
+            WriteLoraProjectionState(writer, state.Output);
+            writer.Write(state.FreezeBaseWeights);
+        }
+
+        internal static LoraAttentionState ReadLoraAttentionState(BinaryReader reader)
+        {
+            return new LoraAttentionState
+            {
+                Query = ReadLoraProjectionState(reader),
+                Key = ReadLoraProjectionState(reader),
+                Value = ReadLoraProjectionState(reader),
+                Output = ReadLoraProjectionState(reader),
+                FreezeBaseWeights = reader.ReadBoolean()
             };
         }
 
@@ -185,11 +237,20 @@ namespace Neuraval.Core.Serialization
             WriteOptionalAdamMatrixOptimizerState(writer, state.KeyOptimizerState);
             WriteOptionalAdamMatrixOptimizerState(writer, state.ValueOptimizerState);
             WriteOptionalAdamMatrixOptimizerState(writer, state.OutputOptimizerState);
+
+            // Campo nuevo desde FormatVersion 2 (Fase 5.5): adaptadores LoRA
+            // de esta capa, opcionales. Va al final para no romper el layout
+            // de los archivos escritos por versiones anteriores.
+            writer.Write(state.LoraState != null);
+            if (state.LoraState != null)
+            {
+                WriteLoraAttentionState(writer, state.LoraState);
+            }
         }
 
-        private static MultiHeadAttentionState ReadMultiHeadAttentionState(BinaryReader reader)
+        private static MultiHeadAttentionState ReadMultiHeadAttentionState(BinaryReader reader, ushort formatVersion)
         {
-            return new MultiHeadAttentionState
+            var state = new MultiHeadAttentionState
             {
                 EmbeddingDim = reader.ReadInt32(),
                 NumHeads = reader.ReadInt32(),
@@ -202,6 +263,16 @@ namespace Neuraval.Core.Serialization
                 ValueOptimizerState = ReadOptionalAdamMatrixOptimizerState(reader),
                 OutputOptimizerState = ReadOptionalAdamMatrixOptimizerState(reader)
             };
+
+            // Los archivos FormatVersion 1 (pre-Fase 5.5) terminan acá: no
+            // tienen el bloque LoRA, así que no hay nada más que leer.
+            if (formatVersion >= 2)
+            {
+                bool hasLora = reader.ReadBoolean();
+                state.LoraState = hasLora ? ReadLoraAttentionState(reader) : null;
+            }
+
+            return state;
         }
 
         // ---------------------------------------------------------------
@@ -255,7 +326,7 @@ namespace Neuraval.Core.Serialization
             WriteLayerNormalizationState(writer, state.Norm2State);
         }
 
-        private static TransformerBlockState ReadTransformerBlockState(BinaryReader reader)
+        private static TransformerBlockState ReadTransformerBlockState(BinaryReader reader, ushort formatVersion)
         {
             return new TransformerBlockState
             {
@@ -263,7 +334,7 @@ namespace Neuraval.Core.Serialization
                 NumHeads = reader.ReadInt32(),
                 FeedforwardDim = reader.ReadInt32(),
                 Dropout = reader.ReadSingle(),
-                AttentionState = ReadMultiHeadAttentionState(reader),
+                AttentionState = ReadMultiHeadAttentionState(reader, formatVersion),
                 FeedforwardState = ReadFeedForwardNetworkState(reader),
                 Norm1State = ReadLayerNormalizationState(reader),
                 Norm2State = ReadLayerNormalizationState(reader)
@@ -297,7 +368,14 @@ namespace Neuraval.Core.Serialization
             WriteOptionalAdamVectorOptimizerState(writer, state.OutputBiasOptimizerState);
         }
 
-        public static TransformerModelState ReadTransformerModelState(BinaryReader reader)
+        /// <summary>
+        /// Lee el Body de un <c>.navm</c>. <paramref name="formatVersion"/> es la
+        /// versión de layout con la que se escribió el archivo (leída del
+        /// encabezado del archivo por <see cref="ModelBinarySerializer"/>), y
+        /// determina si hay bloques LoRA opcionales que leer dentro de cada
+        /// capa de atención (ver <see cref="ModelBinaryFormat.CurrentFormatVersion"/>).
+        /// </summary>
+        public static TransformerModelState ReadTransformerModelState(BinaryReader reader, ushort formatVersion)
         {
             var state = new TransformerModelState
             {
@@ -315,7 +393,7 @@ namespace Neuraval.Core.Serialization
             var blockStates = new List<TransformerBlockState>(blockCount);
             for (int i = 0; i < blockCount; i++)
             {
-                blockStates.Add(ReadTransformerBlockState(reader));
+                blockStates.Add(ReadTransformerBlockState(reader, formatVersion));
             }
             state.BlockStates = blockStates;
 

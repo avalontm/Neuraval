@@ -46,6 +46,15 @@ namespace Neuraval.Cuda.Native
         internal static extern void ncb_cuda_matmul_transpose_a(float[] hostA, float[] hostB, float[] hostC, int p, int m, int n);
 
         [DllImport(LibraryName)]
+        internal static extern void ncb_cuda_cast_float_to_half_device(IntPtr devSrcFloat, IntPtr devDstHalf, int n);
+
+        [DllImport(LibraryName)]
+        internal static extern void ncb_cuda_matmul_half_b_device(IntPtr devA, IntPtr devBHalf, IntPtr devC, int m, int k, int n);
+
+        [DllImport(LibraryName)]
+        internal static extern void ncb_cuda_matmul_transpose_b_half_device(IntPtr devA, IntPtr devBHalf, IntPtr devC, int m, int k, int n, float scale);
+
+        [DllImport(LibraryName)]
         internal static extern void ncb_cuda_softmax_rows_device(IntPtr devInput, IntPtr devOutput, int rows, int cols);
 
         [DllImport(LibraryName)]

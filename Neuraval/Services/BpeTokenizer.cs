@@ -52,12 +52,19 @@ namespace Neuraval.Core.Services
             return _nextId - 1;
         }
 
+        private const int SpecialTokenCount = 5;
+
         public void BuildVocabulary(List<string> texts)
         {
             Train(texts, numMerges: 300, minPairFrequency: 2);
         }
 
-        public void Train(List<string> texts, int numMerges = 300, int minPairFrequency = 2)
+        public void BuildVocabulary(List<string> texts, int vocabSize)
+        {
+            Train(texts, minPairFrequency: 2, targetVocabSize: vocabSize);
+        }
+
+        public void Train(List<string> texts, int numMerges = 300, int minPairFrequency = 2, int? targetVocabSize = null)
         {
             var wordFrequency = new Dictionary<string, int>();
 
@@ -85,9 +92,17 @@ namespace Neuraval.Core.Services
                 }
             }
 
+            int effectiveNumMerges = numMerges;
+
+            if (targetVocabSize.HasValue)
+            {
+                int baseVocabSize = SpecialTokenCount + vocabSymbols.Count;
+                effectiveNumMerges = Math.Max(0, targetVocabSize.Value - baseVocabSize);
+            }
+
             _merges = new List<MergeRule>();
 
-            for (int step = 0; step < numMerges; step++)
+            for (int step = 0; step < effectiveNumMerges; step++)
             {
                 var pairCounts = new Dictionary<(string, string), int>();
 

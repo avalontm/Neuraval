@@ -48,6 +48,11 @@
             BuildVocabulary(texts, minFrequency: 1, maxVocabSize: 50000);
         }
 
+        public void BuildVocabulary(List<string> texts, int vocabSize)
+        {
+            BuildVocabulary(texts, minFrequency: 1, maxVocabSize: vocabSize);
+        }
+
         public void BuildVocabulary(List<string> texts, int minFrequency = 1, int maxVocabSize = 50000)
         {
             var tokenFrequency = new Dictionary<string, int>();
