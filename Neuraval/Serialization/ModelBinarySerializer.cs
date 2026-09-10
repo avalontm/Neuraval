@@ -100,9 +100,84 @@ namespace Neuraval.Core.Serialization
         }
 
         /// <summary>
+        /// Cuantiza y guarda <paramref name="modelState"/> en INT8 (Fase 5.4):
+        /// las matrices de pesos grandes quedan en INT8 + escala por fila y no
+        /// se persiste estado de optimizadores Adam, así que el resultado es
+        /// un archivo mucho más chico pensado solo para inferencia. Para
+        /// seguir entrenando el modelo hay que usar el <c>.navm</c> original
+        /// (sin cuantizar).
+        /// </summary>
+        public static void SaveQuantized(string filePath, TransformerModelState modelState, ModelBinaryHeader header, bool compress = true)
+        {
+            if (modelState == null) throw new ArgumentNullException(nameof(modelState));
+            if (header == null) throw new ArgumentNullException(nameof(header));
+
+            var directory = Path.GetDirectoryName(Path.GetFullPath(filePath));
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            byte[] rawBody;
+            using (var bodyStream = new MemoryStream())
+            {
+                using (var bodyWriter = new BinaryWriter(bodyStream, Encoding.UTF8, leaveOpen: true))
+                {
+                    QuantizedModelStateBinaryConverter.WriteTransformerModelStateQuantized(bodyWriter, modelState);
+                }
+                rawBody = bodyStream.ToArray();
+            }
+
+            var flags = ModelBinaryFormat.ModelFlags.Int8QuantizedWeights;
+            byte[] bodyOnDisk;
+            if (compress)
+            {
+                using var compressedStream = new MemoryStream();
+                using (var gzip = new GZipStream(compressedStream, CompressionLevel.Optimal, leaveOpen: true))
+                {
+                    gzip.Write(rawBody, 0, rawBody.Length);
+                }
+                bodyOnDisk = compressedStream.ToArray();
+                flags |= ModelBinaryFormat.ModelFlags.GZipCompressed;
+            }
+            else
+            {
+                bodyOnDisk = rawBody;
+            }
+
+            byte[] checksum = SHA256.HashData(bodyOnDisk);
+
+            header.FormatVersion = ModelBinaryFormat.CurrentFormatVersion;
+            header.Compressed = compress;
+            header.Quantized = true;
+            header.QuantizationScheme = "int8-simetrico-por-fila";
+            byte[] headerJson = JsonSerializer.SerializeToUtf8Bytes(header, HeaderJsonOptions);
+
+            var tempPath = filePath + ".tmp";
+            using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write))
+            using (var writer = new BinaryWriter(fileStream, Encoding.UTF8))
+            {
+                writer.Write(ModelBinaryFormat.MagicBytes);
+                writer.Write(ModelBinaryFormat.CurrentFormatVersion);
+                writer.Write((byte)flags);
+                writer.Write((byte)0); // reservado
+                writer.Write(headerJson.Length);
+                writer.Write(headerJson);
+                writer.Write(bodyOnDisk.Length);
+                writer.Write(bodyOnDisk);
+                writer.Write(checksum);
+            }
+
+            File.Move(tempPath, filePath, overwrite: true);
+        }
+
+        /// <summary>
         /// Carga un archivo <c>.navm</c> completo: valida la firma, la versión
         /// de formato y el checksum, y devuelve tanto los pesos como el
-        /// encabezado con los metadatos del modelo.
+        /// encabezado con los metadatos del modelo. Si el archivo fue guardado
+        /// cuantizado (<see cref="SaveQuantized"/>), las matrices se decuantizan
+        /// de vuelta a float32 en memoria de forma transparente: el resto del
+        /// pipeline no necesita saber que en disco estaban en INT8.
         /// </summary>
         public static (TransformerModelState ModelState, ModelBinaryHeader Header) Load(string filePath)
         {
@@ -134,9 +209,14 @@ namespace Neuraval.Core.Serialization
                 ? Decompress(bodyOnDisk)
                 : bodyOnDisk;
 
+            bool isQuantized = flags.HasFlag(ModelBinaryFormat.ModelFlags.Int8QuantizedWeights);
+            header.Quantized = isQuantized;
+
             using var bodyStream = new MemoryStream(rawBody);
             using var bodyReader = new BinaryReader(bodyStream, Encoding.UTF8);
-            var modelState = ModelStateBinaryConverter.ReadTransformerModelState(bodyReader);
+            var modelState = isQuantized
+                ? QuantizedModelStateBinaryConverter.ReadTransformerModelStateQuantized(bodyReader)
+                : ModelStateBinaryConverter.ReadTransformerModelState(bodyReader, formatVersion);
 
             return (modelState, header);
         }

@@ -1,4 +1,4 @@
-﻿using Neuraval.Core.Utils;
+﻿using Neuraval.Tensor;
 
 namespace Neuraval.Core.Models
 {
@@ -16,6 +16,16 @@ namespace Neuraval.Core.Models
         private LayerNormalization _norm1;
         private LayerNormalization _norm2;
 
+        /// <summary>
+        /// Cuando hay LoRA habilitado y se pidió congelar la base (Fase 5.5),
+        /// este bloque no solo deja de actualizar los pesos Q/K/V/O de
+        /// atención (eso lo maneja <see cref="MultiHeadAttention"/> con su
+        /// propio flag), sino también el FeedForwardNetwork y las dos
+        /// LayerNormalization del bloque: con LoRA, lo único que se entrena
+        /// dentro de este bloque son los adaptadores A/B de atención.
+        /// </summary>
+        private bool _freezeNonLoraWeights;
+
         private float[,]? _lastAttentionDropoutMask;
         private float[,]? _lastFeedforwardDropoutMask;
 
@@ -24,6 +34,8 @@ namespace Neuraval.Core.Models
 
         public int EmbeddingDim => _embeddingDim;
         public int NumHeads => _numHeads;
+        public bool HasLora => _attention.HasLora;
+        public bool IsBaseFrozen => _freezeNonLoraWeights;
 
         public TransformerBlock(int embeddingDim, int numHeads, int feedforwardDim, float dropout = 0.1f, int seed = 42)
         {
@@ -37,6 +49,35 @@ namespace Neuraval.Core.Models
             _norm1 = new LayerNormalization(embeddingDim);
             _norm2 = new LayerNormalization(embeddingDim);
             _dropoutRandom = new Random(seed + 987654);
+        }
+
+        /// <summary>
+        /// Habilita adaptadores LoRA (Fase 5.5) en la capa de atención de este
+        /// bloque. No hace nada si ya estaban habilitados.
+        /// </summary>
+        public void EnableLora(int rank, float alpha, int seed)
+        {
+            _attention.EnableLora(rank, alpha, seed);
+        }
+
+        /// <summary>
+        /// Si <paramref name="freeze"/> es true, <see cref="UpdateWeights"/> deja
+        /// de tocar los pesos base de atención, el FeedForwardNetwork y las
+        /// LayerNormalization de este bloque (solo se siguen entrenando los
+        /// adaptadores LoRA, si están habilitados).
+        /// </summary>
+        public void SetFreezeBaseWeights(bool freeze)
+        {
+            _freezeNonLoraWeights = freeze;
+            _attention.SetFreezeBaseWeights(freeze);
+        }
+
+        public LoraAttentionState? SaveLoraState() => _attention.SaveLoraState();
+
+        public void LoadLoraState(LoraAttentionState state)
+        {
+            _attention.LoadLoraState(state);
+            _freezeNonLoraWeights = state.FreezeBaseWeights;
         }
 
         public void ZeroGradients()
@@ -55,12 +96,20 @@ namespace Neuraval.Core.Models
             _norm2.AverageGradients(batchSize);
         }
 
-        public void ClipGradients(float maxNorm)
+        public float SumSquaredGradients()
         {
-            _attention.ClipGradients(maxNorm);
-            _feedforward.ClipGradients(maxNorm);
-            _norm1.ClipGradients(maxNorm);
-            _norm2.ClipGradients(maxNorm);
+            return _attention.SumSquaredGradients()
+                 + _feedforward.SumSquaredGradients()
+                 + _norm1.SumSquaredGradients()
+                 + _norm2.SumSquaredGradients();
+        }
+
+        public void ScaleGradients(float scale)
+        {
+            _attention.ScaleGradients(scale);
+            _feedforward.ScaleGradients(scale);
+            _norm1.ScaleGradients(scale);
+            _norm2.ScaleGradients(scale);
         }
 
         public float[,] Forward(float[,] input, float[,]? mask = null, bool training = true)
@@ -74,14 +123,17 @@ namespace Neuraval.Core.Models
             }
 
             var norm1Output = _norm1.Forward(input);
-            var attentionOutput = _attention.Forward(norm1Output, mask);
+
+            float[,] attentionOutput;
 
             if (training)
             {
+                attentionOutput = _attention.Forward(norm1Output, mask);
                 attentionOutput = ApplyDropout(attentionOutput, _dropout, out _lastAttentionDropoutMask);
             }
             else
             {
+                attentionOutput = _attention.ForwardInference(norm1Output, mask != null);
                 _lastAttentionDropoutMask = null;
             }
 
@@ -98,6 +150,26 @@ namespace Neuraval.Core.Models
                 _lastFeedforwardDropoutMask = null;
             }
 
+            var output = AddResidual(residual1, ffOutput);
+
+            return output;
+        }
+
+        public float[,] ForwardIncremental(float[,] newInput, KVCacheLayer cache)
+        {
+            int embDim = newInput.GetLength(1);
+
+            if (embDim != _embeddingDim)
+            {
+                throw new ArgumentException($"Input dimension {embDim} does not match expected {_embeddingDim}");
+            }
+
+            var norm1Output = _norm1.Forward(newInput);
+            var attentionOutput = _attention.ForwardIncremental(norm1Output, cache);
+            var residual1 = AddResidual(newInput, attentionOutput);
+
+            var norm2Output = _norm2.Forward(residual1);
+            var ffOutput = _feedforward.Forward(norm2Output);
             var output = AddResidual(residual1, ffOutput);
 
             return output;
@@ -139,7 +211,7 @@ namespace Neuraval.Core.Models
                 _lastAttentionDropoutMaskBatch = null;
             }
 
-            var residual1 = Matematicas.BatchMatrixAdd(inputBatch, attentionOutput);
+            var residual1 = AddResidualBatch(inputBatch, attentionOutput);
             var norm2Output = _norm2.ForwardBatch(residual1);
             var ffOutput = _feedforward.ForwardBatch(norm2Output);
 
@@ -152,7 +224,7 @@ namespace Neuraval.Core.Models
                 _lastFeedforwardDropoutMaskBatch = null;
             }
 
-            var output = Matematicas.BatchMatrixAdd(residual1, ffOutput);
+            var output = AddResidualBatch(residual1, ffOutput);
 
             return output;
         }
@@ -178,7 +250,7 @@ namespace Neuraval.Core.Models
                 _lastAttentionDropoutMaskBatch = null;
             }
 
-            var residual1 = Matematicas.BatchMatrixAdd(inputBatch, attentionOutput);
+            var residual1 = AddResidualBatch(inputBatch, attentionOutput);
             var norm2Output = _norm2.ForwardBatch(residual1);
             var ffOutput = _feedforward.ForwardBatch(norm2Output);
 
@@ -191,7 +263,7 @@ namespace Neuraval.Core.Models
                 _lastFeedforwardDropoutMaskBatch = null;
             }
 
-            var output = Matematicas.BatchMatrixAdd(residual1, ffOutput);
+            var output = AddResidualBatch(residual1, ffOutput);
 
             return output;
         }
@@ -201,31 +273,30 @@ namespace Neuraval.Core.Models
             var gradFeedforwardOutput = ApplyDropoutBackwardBatch(gradOutputBatch, _lastFeedforwardDropoutMaskBatch);
             var gradNorm2Output = _feedforward.BackwardBatch(gradFeedforwardOutput, 0.0f);
             var gradResidual1FromNorm2 = _norm2.BackwardBatch(gradNorm2Output, 0.0f);
-            var gradResidual1 = Matematicas.BatchMatrixAdd(gradOutputBatch, gradResidual1FromNorm2);
+            var gradResidual1 = AddResidualBatch(gradOutputBatch, gradResidual1FromNorm2);
 
             var gradAttentionOutput = ApplyDropoutBackwardBatch(gradResidual1, _lastAttentionDropoutMaskBatch);
             var gradNorm1Output = _attention.BackwardBatch(gradAttentionOutput, 0.0f);
             var gradInputFromNorm1 = _norm1.BackwardBatch(gradNorm1Output, 0.0f);
-            var gradInput = Matematicas.BatchMatrixAdd(gradResidual1, gradInputFromNorm1);
+            var gradInput = AddResidualBatch(gradResidual1, gradInputFromNorm1);
 
             return gradInput;
         }
 
         private float[,] AddResidual(float[,] input, float[,] residual)
         {
-            int rows = input.GetLength(0);
-            int cols = input.GetLength(1);
-            var result = new float[rows, cols];
+            var inputTensor = Neuraval.Tensor.Tensor.FromArray2D(input);
+            var residualTensor = Neuraval.Tensor.Tensor.FromArray2D(residual);
 
-            for (int i = 0; i < rows; i++)
-            {
-                for (int j = 0; j < cols; j++)
-                {
-                    result[i, j] = input[i, j] + residual[i, j];
-                }
-            }
+            return TensorOps.Add(inputTensor, residualTensor).ToArray2D();
+        }
 
-            return result;
+        private float[,,] AddResidualBatch(float[,,] input, float[,,] residual)
+        {
+            var inputTensor = Neuraval.Tensor.Tensor.FromArray3D(input);
+            var residualTensor = Neuraval.Tensor.Tensor.FromArray3D(residual);
+
+            return TensorOps.Add(inputTensor, residualTensor).ToArray3D();
         }
 
         private float[,] ApplyDropout(float[,] input, float dropoutRate, out float[,]? mask)
@@ -271,19 +342,10 @@ namespace Neuraval.Core.Models
                 return gradOutput;
             }
 
-            int rows = gradOutput.GetLength(0);
-            int cols = gradOutput.GetLength(1);
-            var result = new float[rows, cols];
+            var gradOutputTensor = Neuraval.Tensor.Tensor.FromArray2D(gradOutput);
+            var maskTensor = Neuraval.Tensor.Tensor.FromArray2D(mask);
 
-            for (int i = 0; i < rows; i++)
-            {
-                for (int j = 0; j < cols; j++)
-                {
-                    result[i, j] = gradOutput[i, j] * mask[i, j];
-                }
-            }
-
-            return result;
+            return TensorOps.Multiply(gradOutputTensor, maskTensor).ToArray2D();
         }
 
         private float[,,] ApplyDropoutBatch(float[,,] inputBatch, float dropoutRate, out float[,,]? maskBatch)
@@ -333,31 +395,22 @@ namespace Neuraval.Core.Models
                 return gradOutputBatch;
             }
 
-            int batchSize = gradOutputBatch.GetLength(0);
-            int seqLen = gradOutputBatch.GetLength(1);
-            int dim = gradOutputBatch.GetLength(2);
-            var result = new float[batchSize, seqLen, dim];
+            var gradOutputTensor = Neuraval.Tensor.Tensor.FromArray3D(gradOutputBatch);
+            var maskTensor = Neuraval.Tensor.Tensor.FromArray3D(maskBatch);
 
-            for (int b = 0; b < batchSize; b++)
-            {
-                for (int i = 0; i < seqLen; i++)
-                {
-                    for (int j = 0; j < dim; j++)
-                    {
-                        result[b, i, j] = gradOutputBatch[b, i, j] * maskBatch[b, i, j];
-                    }
-                }
-            }
-
-            return result;
+            return TensorOps.Multiply(gradOutputTensor, maskTensor).ToArray3D();
         }
 
         public void UpdateWeights(float learningRate)
         {
             _attention.UpdateWeights(learningRate);
-            _feedforward.UpdateWeights(learningRate);
-            _norm1.UpdateWeights(learningRate);
-            _norm2.UpdateWeights(learningRate);
+
+            if (!_freezeNonLoraWeights)
+            {
+                _feedforward.UpdateWeights(learningRate);
+                _norm1.UpdateWeights(learningRate);
+                _norm2.UpdateWeights(learningRate);
+            }
         }
 
         public void ResetGradients()
@@ -395,6 +448,11 @@ namespace Neuraval.Core.Models
             block._feedforward = FeedForwardNetwork.LoadState(state.FeedforwardState);
             block._norm1 = LayerNormalization.LoadState(state.Norm1State);
             block._norm2 = LayerNormalization.LoadState(state.Norm2State);
+
+            // Si la capa de atención cargó adaptadores LoRA, el flag de
+            // congelamiento del resto del bloque (FFN/normas) viaja dentro
+            // de ese mismo estado.
+            block._freezeNonLoraWeights = state.AttentionState.LoraState?.FreezeBaseWeights ?? false;
 
             return block;
         }

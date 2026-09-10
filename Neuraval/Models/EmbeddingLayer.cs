@@ -1,5 +1,6 @@
 using System;
 using Neuraval.Core.Utils;
+using Neuraval.Tensor;
 
 namespace Neuraval.Core.Models
 {
@@ -56,41 +57,21 @@ namespace Neuraval.Core.Models
 
             float scale = 1.0f / batchSize;
 
-            for (int i = 0; i < _vocabSize; i++)
-            {
-                for (int j = 0; j < _embeddingDim; j++)
-                {
-                    _gradients[i, j] = _accumulatedGradients[i, j] * scale;
-                }
-            }
+            var accumulatedTensor = Neuraval.Tensor.Tensor.FromArray2D(_accumulatedGradients);
+            _gradients = TensorOps.Scale(accumulatedTensor, scale).ToArray2D();
         }
 
-        public void ClipGradients(float maxNorm)
+        public float SumSquaredGradients()
         {
-            float totalNorm = 0;
+            var gradientsTensor = Neuraval.Tensor.Tensor.FromArray2D(_gradients);
+            var squared = TensorOps.Multiply(gradientsTensor, gradientsTensor);
+            return TensorOps.Sum(squared);
+        }
 
-            for (int i = 0; i < _vocabSize; i++)
-            {
-                for (int j = 0; j < _embeddingDim; j++)
-                {
-                    totalNorm += _gradients[i, j] * _gradients[i, j];
-                }
-            }
-
-            totalNorm = MathF.Sqrt(totalNorm);
-
-            if (totalNorm > maxNorm)
-            {
-                float scale = maxNorm / (totalNorm + 1e-10f);
-
-                for (int i = 0; i < _vocabSize; i++)
-                {
-                    for (int j = 0; j < _embeddingDim; j++)
-                    {
-                        _gradients[i, j] *= scale;
-                    }
-                }
-            }
+        public void ScaleGradients(float scale)
+        {
+            var gradientsTensor = Neuraval.Tensor.Tensor.FromArray2D(_gradients);
+            _gradients = TensorOps.Scale(gradientsTensor, scale).ToArray2D();
         }
 
         public float[] GetEmbedding(int tokenIndex)

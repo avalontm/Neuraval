@@ -1,4 +1,5 @@
 #include <cuda_runtime.h>
+#include <cuda_fp16.h>
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
@@ -446,6 +447,170 @@ NCB_API void ncb_cuda_matmul_transpose_a(const float* hostA, const float* hostB,
     ncb_cuda_free(devA);
     ncb_cuda_free(devB);
     ncb_cuda_free(devC);
+}
+
+__global__ void ncb_cast_float_to_half_kernel(const float* src, half* dst, int n)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+
+    dst[idx] = __float2half(src[idx]);
+}
+
+NCB_API void ncb_cuda_cast_float_to_half_device(const void* devSrcFloat, void* devDstHalf, int n)
+{
+    std::lock_guard<std::recursive_mutex> lock(g_mutex);
+
+    if (!g_initialized)
+    {
+        g_lastStatus = NCB_ERROR_NOT_INITIALIZED;
+        return;
+    }
+
+    if (n <= 0)
+    {
+        g_lastStatus = NCB_ERROR_INVALID_ARGUMENT;
+        return;
+    }
+
+    dim3 block(NCB_ELEMENTWISE_THREADS);
+    dim3 grid((n + NCB_ELEMENTWISE_THREADS - 1) / NCB_ELEMENTWISE_THREADS);
+
+    ncb_cast_float_to_half_kernel<<<grid, block>>>(
+        static_cast<const float*>(devSrcFloat),
+        static_cast<half*>(devDstHalf),
+        n);
+
+    cudaError_t err = cudaGetLastError();
+    ncb_set_status(err, NCB_ERROR_LAUNCH_FAILED);
+}
+
+__global__ void ncb_matmul_half_b_kernel(const float* a, const half* b, float* c, int m, int k, int n)
+{
+    __shared__ float tileA[NCB_TILE][NCB_TILE];
+    __shared__ float tileB[NCB_TILE][NCB_TILE];
+
+    int row = blockIdx.y * NCB_TILE + threadIdx.y;
+    int col = blockIdx.x * NCB_TILE + threadIdx.x;
+
+    float acc = 0.0f;
+    int numTiles = (k + NCB_TILE - 1) / NCB_TILE;
+
+    for (int t = 0; t < numTiles; t++)
+    {
+        int aCol = t * NCB_TILE + threadIdx.x;
+        int bRow = t * NCB_TILE + threadIdx.y;
+
+        tileA[threadIdx.y][threadIdx.x] = (row < m && aCol < k) ? a[row * k + aCol] : 0.0f;
+        tileB[threadIdx.y][threadIdx.x] = (bRow < k && col < n) ? __half2float(b[bRow * n + col]) : 0.0f;
+
+        __syncthreads();
+
+        for (int i = 0; i < NCB_TILE; i++)
+        {
+            acc += tileA[threadIdx.y][i] * tileB[i][threadIdx.x];
+        }
+
+        __syncthreads();
+    }
+
+    if (row < m && col < n)
+    {
+        c[row * n + col] = acc;
+    }
+}
+
+NCB_API void ncb_cuda_matmul_half_b_device(const void* devA, const void* devBHalf, void* devC, int m, int k, int n)
+{
+    std::lock_guard<std::recursive_mutex> lock(g_mutex);
+
+    if (!g_initialized)
+    {
+        g_lastStatus = NCB_ERROR_NOT_INITIALIZED;
+        return;
+    }
+
+    if (m <= 0 || k <= 0 || n <= 0)
+    {
+        g_lastStatus = NCB_ERROR_INVALID_ARGUMENT;
+        return;
+    }
+
+    dim3 block(NCB_TILE, NCB_TILE);
+    dim3 grid((n + NCB_TILE - 1) / NCB_TILE, (m + NCB_TILE - 1) / NCB_TILE);
+
+    ncb_matmul_half_b_kernel<<<grid, block>>>(
+        static_cast<const float*>(devA),
+        static_cast<const half*>(devBHalf),
+        static_cast<float*>(devC),
+        m, k, n);
+
+    cudaError_t err = cudaGetLastError();
+    ncb_set_status(err, NCB_ERROR_LAUNCH_FAILED);
+}
+
+__global__ void ncb_matmul_transpose_b_half_kernel(const float* a, const half* b, float* c, int m, int k, int n, float scale)
+{
+    __shared__ float tileA[NCB_TILE][NCB_TILE];
+    __shared__ float tileB[NCB_TILE][NCB_TILE];
+
+    int row = blockIdx.y * NCB_TILE + threadIdx.y;
+    int col = blockIdx.x * NCB_TILE + threadIdx.x;
+
+    float acc = 0.0f;
+    int numTiles = (k + NCB_TILE - 1) / NCB_TILE;
+
+    for (int t = 0; t < numTiles; t++)
+    {
+        int aCol = t * NCB_TILE + threadIdx.x;
+        int bCol = t * NCB_TILE + threadIdx.y;
+
+        tileA[threadIdx.y][threadIdx.x] = (row < m && aCol < k) ? a[row * k + aCol] : 0.0f;
+        tileB[threadIdx.x][threadIdx.y] = (col < n && bCol < k) ? __half2float(b[col * k + bCol]) : 0.0f;
+
+        __syncthreads();
+
+        for (int i = 0; i < NCB_TILE; i++)
+        {
+            acc += tileA[threadIdx.y][i] * tileB[threadIdx.x][i];
+        }
+
+        __syncthreads();
+    }
+
+    if (row < m && col < n)
+    {
+        c[row * n + col] = acc * scale;
+    }
+}
+
+NCB_API void ncb_cuda_matmul_transpose_b_half_device(const void* devA, const void* devBHalf, void* devC, int m, int k, int n, float scale)
+{
+    std::lock_guard<std::recursive_mutex> lock(g_mutex);
+
+    if (!g_initialized)
+    {
+        g_lastStatus = NCB_ERROR_NOT_INITIALIZED;
+        return;
+    }
+
+    if (m <= 0 || k <= 0 || n <= 0)
+    {
+        g_lastStatus = NCB_ERROR_INVALID_ARGUMENT;
+        return;
+    }
+
+    dim3 block(NCB_TILE, NCB_TILE);
+    dim3 grid((n + NCB_TILE - 1) / NCB_TILE, (m + NCB_TILE - 1) / NCB_TILE);
+
+    ncb_matmul_transpose_b_half_kernel<<<grid, block>>>(
+        static_cast<const float*>(devA),
+        static_cast<const half*>(devBHalf),
+        static_cast<float*>(devC),
+        m, k, n, scale);
+
+    cudaError_t err = cudaGetLastError();
+    ncb_set_status(err, NCB_ERROR_LAUNCH_FAILED);
 }
 
 __global__ void ncb_softmax_rows_kernel(const float* input, float* output, int rows, int cols)

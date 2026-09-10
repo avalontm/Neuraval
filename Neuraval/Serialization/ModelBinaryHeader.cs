@@ -47,5 +47,19 @@ namespace Neuraval.Core.Serialization
 
         /// <summary>Indica si el Body quedó comprimido con GZip en disco.</summary>
         public bool Compressed { get; set; }
+
+        /// <summary>
+        /// Indica si el Body fue guardado cuantizado en INT8 (Fase 5.4). Un
+        /// modelo cuantizado es un artefacto de solo-inferencia: no conserva
+        /// estado de optimizadores Adam y no está pensado para reanudar
+        /// entrenamiento desde él.
+        /// </summary>
+        public bool Quantized { get; set; }
+
+        /// <summary>
+        /// Nombre del esquema de cuantización usado, o <c>null</c> si el
+        /// modelo no está cuantizado. Informativo únicamente.
+        /// </summary>
+        public string? QuantizationScheme { get; set; }
     }
 }

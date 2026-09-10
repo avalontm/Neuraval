@@ -55,8 +55,18 @@ namespace Neuraval.Core.Serialization
         /// Versión actual del layout binario del Body (pesos + optimizadores).
         /// Se incrementa únicamente cuando cambia el orden/tipo de los campos
         /// escritos por <see cref="ModelStateBinaryConverter"/>.
+        ///
+        /// Historial:
+        /// <list type="bullet">
+        /// <item>1: layout original (pesos + Adam), sin LoRA.</item>
+        /// <item>2 (Fase 5.5): cada <c>MultiHeadAttentionState</c> agrega, al
+        /// final, un flag opcional + el estado de sus adaptadores LoRA (si
+        /// los tiene). Los archivos versión 1 se siguen leyendo igual: ese
+        /// bloque extra simplemente no se lee y las capas quedan sin LoRA,
+        /// como antes.</item>
+        /// </list>
         /// </summary>
-        public const ushort CurrentFormatVersion = 1;
+        public const ushort CurrentFormatVersion = 2;
 
         /// <summary>Tamaño en bytes de un checksum SHA-256.</summary>
         public const int ChecksumLength = 32;
@@ -65,7 +75,16 @@ namespace Neuraval.Core.Serialization
         public enum ModelFlags : byte
         {
             None = 0,
-            GZipCompressed = 1 << 0
+            GZipCompressed = 1 << 0,
+
+            /// <summary>
+            /// El Body fue escrito con <c>QuantizedModelStateBinaryConverter</c>:
+            /// las matrices de pesos grandes (embeddings, proyecciones de
+            /// atención, feed-forward) están en INT8 + escala por fila en vez
+            /// de float32, y no incluye estado de optimizadores Adam (es un
+            /// artefacto de solo-inferencia, ver Fase 5.4 del plan).
+            /// </summary>
+            Int8QuantizedWeights = 1 << 1
         }
     }
 }

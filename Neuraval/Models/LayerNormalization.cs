@@ -1,4 +1,6 @@
 using Neuraval.Core.Utils;
+using Neuraval.Cuda;
+using Neuraval.Tensor;
 
 namespace Neuraval.Core.Models
 {
@@ -59,35 +61,30 @@ namespace Neuraval.Core.Models
 
             float scale = 1.0f / batchSize;
 
-            for (int i = 0; i < _normalizedShape; i++)
-            {
-                _gammaGradients[i] = _accumulatedGammaGradients[i] * scale;
-                _betaGradients[i] = _accumulatedBetaGradients[i] * scale;
-            }
+            _gammaGradients = TensorOps.Scale(Neuraval.Tensor.Tensor.FromArray1D(_accumulatedGammaGradients), scale).ToArray1D();
+            _betaGradients = TensorOps.Scale(Neuraval.Tensor.Tensor.FromArray1D(_accumulatedBetaGradients), scale).ToArray1D();
         }
 
-        public void ClipGradients(float maxNorm)
+        public float GammaGradientAt(int index) => _gammaGradients[index];
+
+        public float BetaGradientAt(int index) => _betaGradients[index];
+
+        public float SumSquaredGradients()
         {
-            float totalNorm = 0;
+            float total = SumSquared(Neuraval.Tensor.Tensor.FromArray1D(_gammaGradients));
+            total += SumSquared(Neuraval.Tensor.Tensor.FromArray1D(_betaGradients));
+            return total;
+        }
 
-            for (int i = 0; i < _normalizedShape; i++)
-            {
-                totalNorm += _gammaGradients[i] * _gammaGradients[i];
-                totalNorm += _betaGradients[i] * _betaGradients[i];
-            }
+        private static float SumSquared(Neuraval.Tensor.Tensor tensor)
+        {
+            return TensorOps.Sum(TensorOps.Multiply(tensor, tensor));
+        }
 
-            totalNorm = MathF.Sqrt(totalNorm);
-
-            if (totalNorm > maxNorm)
-            {
-                float scale = maxNorm / (totalNorm + 1e-10f);
-
-                for (int i = 0; i < _normalizedShape; i++)
-                {
-                    _gammaGradients[i] *= scale;
-                    _betaGradients[i] *= scale;
-                }
-            }
+        public void ScaleGradients(float scale)
+        {
+            _gammaGradients = TensorOps.Scale(Neuraval.Tensor.Tensor.FromArray1D(_gammaGradients), scale).ToArray1D();
+            _betaGradients = TensorOps.Scale(Neuraval.Tensor.Tensor.FromArray1D(_betaGradients), scale).ToArray1D();
         }
 
         public float[,] Forward(float[,] input)
@@ -101,11 +98,24 @@ namespace Neuraval.Core.Models
 
             _lastInput = (float[,])input.Clone();
 
-            var output = Matematicas.LayerNormRowsAuto(input, _gamma, _beta, _epsilon, out var mean, out var std);
-            _lastMean = mean;
-            _lastStd = std;
+            var device = TensorDeviceSelector.Current;
+            var inputTensor = Neuraval.Tensor.Tensor.FromArray2D(input, device);
+            var gammaTensor = Neuraval.Tensor.Tensor.FromArray1D(_gamma, device);
+            var betaTensor = Neuraval.Tensor.Tensor.FromArray1D(_beta, device);
 
-            return output;
+            try
+            {
+                var outputTensor = TensorOps.LayerNormRows(inputTensor, gammaTensor, betaTensor, _epsilon, out var mean, out var std);
+                _lastMean = mean;
+                _lastStd = std;
+
+                return outputTensor.ToArray2D();
+            }
+            catch (CudaException) when (device == DeviceType.Cuda)
+            {
+                TensorDeviceSelector.ReportFailure();
+                return Forward(input);
+            }
         }
 
         public float[,] Backward(float[,] gradOutput, float learningRate)
@@ -113,48 +123,76 @@ namespace Neuraval.Core.Models
             if (_lastInput == null || _lastMean == null || _lastStd == null)
                 throw new InvalidOperationException("Forward must be called before Backward");
 
-            int seqLen = gradOutput.GetLength(0);
+            return BackwardCore(gradOutput, _lastInput, _lastMean, _lastStd);
+        }
+
+        private float[,] BackwardCore(float[,] gradOutput, float[,] input, float[] mean, float[] std)
+        {
+            int rows = gradOutput.GetLength(0);
             int dim = gradOutput.GetLength(1);
 
-            var gradInput = new float[seqLen, dim];
+            var normalized = ComputeNormalized(input, mean, std, rows, dim);
+            AccumulateGammaBetaGradients(gradOutput, normalized);
 
-            for (int i = 0; i < seqLen; i++)
+            var gradInput = new float[rows, dim];
+
+            Parallel.For(0, rows, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, i =>
             {
-                float mean = _lastMean[i];
-                float std = _lastStd[i];
-
-                var normalized = new float[dim];
-                for (int j = 0; j < dim; j++)
-                {
-                    normalized[j] = (_lastInput[i, j] - mean) / std;
-                }
-
-                for (int j = 0; j < dim; j++)
-                {
-                    _accumulatedGammaGradients[j] += gradOutput[i, j] * normalized[j];
-                    _accumulatedBetaGradients[j] += gradOutput[i, j];
-                }
-
+                float rowStd = std[i];
+                float rowMean = mean[i];
                 float gradMean = 0;
                 float gradVar = 0;
 
                 for (int j = 0; j < dim; j++)
                 {
                     float gradNorm = gradOutput[i, j] * _gamma[j];
-                    gradVar += gradNorm * (_lastInput[i, j] - mean) * (-0.5f) * MathF.Pow(std, -3f);
-                    gradMean += gradNorm * (-1.0f / std);
+                    gradVar += gradNorm * (input[i, j] - rowMean) * (-0.5f) * MathF.Pow(rowStd, -3f);
+                    gradMean += gradNorm * (-1.0f / rowStd);
                 }
 
                 for (int j = 0; j < dim; j++)
                 {
                     float gradNorm = gradOutput[i, j] * _gamma[j];
-                    gradInput[i, j] = (gradNorm / std) +
-                                      (gradVar * 2 * (_lastInput[i, j] - mean) / dim) +
+                    gradInput[i, j] = (gradNorm / rowStd) +
+                                      (gradVar * 2 * (input[i, j] - rowMean) / dim) +
                                       (gradMean / dim);
                 }
-            }
+            });
 
             return gradInput;
+        }
+
+        private static float[,] ComputeNormalized(float[,] input, float[] mean, float[] std, int rows, int dim)
+        {
+            var normalized = new float[rows, dim];
+
+            Parallel.For(0, rows, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, i =>
+            {
+                float rowMean = mean[i];
+                float rowStd = std[i];
+
+                for (int j = 0; j < dim; j++)
+                {
+                    normalized[i, j] = (input[i, j] - rowMean) / rowStd;
+                }
+            });
+
+            return normalized;
+        }
+
+        private void AccumulateGammaBetaGradients(float[,] gradOutput, float[,] normalized)
+        {
+            var gradOutputTensor = Neuraval.Tensor.Tensor.FromArray2D(gradOutput);
+            var normalizedTensor = Neuraval.Tensor.Tensor.FromArray2D(normalized);
+
+            var gammaGrad = TensorOps.SumRows(TensorOps.Multiply(gradOutputTensor, normalizedTensor)).ToArray1D();
+            var betaGrad = TensorOps.SumRows(gradOutputTensor).ToArray1D();
+
+            for (int j = 0; j < _normalizedShape; j++)
+            {
+                _accumulatedGammaGradients[j] += gammaGrad[j];
+                _accumulatedBetaGradients[j] += betaGrad[j];
+            }
         }
 
         public float[,,] ForwardBatch(float[,,] inputBatch)
@@ -171,7 +209,26 @@ namespace Neuraval.Core.Models
             _lastInputBatch = (float[,,])inputBatch.Clone();
 
             var flatInput = Matematicas.FlattenBatch(inputBatch);
-            var flatOutput = Matematicas.LayerNormRowsAuto(flatInput, _gamma, _beta, _epsilon, out var flatMean, out var flatStd);
+
+            var device = TensorDeviceSelector.Current;
+            var inputTensor = Neuraval.Tensor.Tensor.FromArray2D(flatInput, device);
+            var gammaTensor = Neuraval.Tensor.Tensor.FromArray1D(_gamma, device);
+            var betaTensor = Neuraval.Tensor.Tensor.FromArray1D(_beta, device);
+
+            float[] flatMean;
+            float[] flatStd;
+            float[,] flatOutput;
+
+            try
+            {
+                var outputTensor = TensorOps.LayerNormRows(inputTensor, gammaTensor, betaTensor, _epsilon, out flatMean, out flatStd);
+                flatOutput = outputTensor.ToArray2D();
+            }
+            catch (CudaException) when (device == DeviceType.Cuda)
+            {
+                TensorDeviceSelector.ReportFailure();
+                return ForwardBatch(inputBatch);
+            }
 
             _lastMeanBatch = new float[batchSize, seqLen];
             _lastStdBatch = new float[batchSize, seqLen];
@@ -194,50 +251,26 @@ namespace Neuraval.Core.Models
 
             int batchSize = gradOutputBatch.GetLength(0);
             int seqLen = gradOutputBatch.GetLength(1);
-            int dim = gradOutputBatch.GetLength(2);
 
-            var gradInput = new float[batchSize, seqLen, dim];
+            var flatGradOutput = Matematicas.FlattenBatch(gradOutputBatch);
+            var flatInput = Matematicas.FlattenBatch(_lastInputBatch);
+            var flatMean = FlattenRowStats(_lastMeanBatch, batchSize, seqLen);
+            var flatStd = FlattenRowStats(_lastStdBatch, batchSize, seqLen);
 
-            for (int b = 0; b < batchSize; b++)
-            {
-                for (int i = 0; i < seqLen; i++)
-                {
-                    float mean = _lastMeanBatch[b, i];
-                    float std = _lastStdBatch[b, i];
+            var flatGradInput = BackwardCore(flatGradOutput, flatInput, flatMean, flatStd);
 
-                    var normalized = new float[dim];
-                    for (int j = 0; j < dim; j++)
-                    {
-                        normalized[j] = (_lastInputBatch[b, i, j] - mean) / std;
-                    }
+            return Matematicas.UnflattenBatch(flatGradInput, batchSize, seqLen);
+        }
 
-                    for (int j = 0; j < dim; j++)
-                    {
-                        _accumulatedGammaGradients[j] += gradOutputBatch[b, i, j] * normalized[j];
-                        _accumulatedBetaGradients[j] += gradOutputBatch[b, i, j];
-                    }
+        private static float[] FlattenRowStats(float[,] stats, int batchSize, int seqLen)
+        {
+            var flat = new float[batchSize * seqLen];
 
-                    float gradMean = 0;
-                    float gradVar = 0;
+            // stats[,] es contiguo row-major y su forma [batchSize, seqLen] ya
+            // coincide elemento a elemento con el flat de salida: memcpy puro.
+            System.Buffer.BlockCopy(stats, 0, flat, 0, flat.Length * sizeof(float));
 
-                    for (int j = 0; j < dim; j++)
-                    {
-                        float gradNorm = gradOutputBatch[b, i, j] * _gamma[j];
-                        gradVar += gradNorm * (_lastInputBatch[b, i, j] - mean) * (-0.5f) * MathF.Pow(std, -3f);
-                        gradMean += gradNorm * (-1.0f / std);
-                    }
-
-                    for (int j = 0; j < dim; j++)
-                    {
-                        float gradNorm = gradOutputBatch[b, i, j] * _gamma[j];
-                        gradInput[b, i, j] = (gradNorm / std) +
-                                          (gradVar * 2 * (_lastInputBatch[b, i, j] - mean) / dim) +
-                                          (gradMean / dim);
-                    }
-                }
-            }
-
-            return gradInput;
+            return flat;
         }
 
         public void UpdateWeights(float learningRate)

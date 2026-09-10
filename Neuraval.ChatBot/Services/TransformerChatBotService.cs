@@ -67,7 +67,7 @@ namespace Neuraval.ChatBot.Services
             }
             else
             {
-                _tokenizer.BuildVocabulary(texts);
+                _tokenizer.BuildVocabulary(texts, maxVocabSize);
             }
 
             _model = new TransformerModel(
@@ -80,7 +80,8 @@ namespace Neuraval.ChatBot.Services
                 dropout: (float)_dropout);
 
             Console.WriteLine("Transformer model initialized:");
-            Console.WriteLine($"  Vocabulary Size: {_tokenizer.VocabSize}");
+            Console.WriteLine($"  Vocabulary Size: {_tokenizer.VocabSize} (target: {maxVocabSize})");
+            Console.WriteLine($"  Embedding table: {_tokenizer.VocabSize}x{_embeddingDim} (~{_tokenizer.VocabSize * (long)_embeddingDim * sizeof(float) / (1024.0 * 1024.0):F1} MB, embedding + output projection)");
             Console.WriteLine($"  Embedding Dimension: {_embeddingDim}");
             Console.WriteLine($"  Number of Layers: {_numLayers}");
             Console.WriteLine($"  Number of Heads: {_numHeads}");

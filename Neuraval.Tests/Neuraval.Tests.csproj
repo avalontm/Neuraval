@@ -18,6 +18,7 @@
     <ProjectReference Include="..\Neuraval.ChatBot\Neuraval.ChatBot.csproj" />
     <ProjectReference Include="..\Neuraval.Evolution\Neuraval.Evolution.csproj" />
     <ProjectReference Include="..\Neuraval.Evolution.MarioBridge\Neuraval.Evolution.MarioBridge.csproj" />
+    <ProjectReference Include="..\Neuraval.Tensor\Neuraval.Tensor.csproj" />
   </ItemGroup>
 
 </Project>

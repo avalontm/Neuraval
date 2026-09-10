@@ -14,6 +14,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Neuraval.Cuda\Neuraval.Cuda.csproj" />
     <ProjectReference Include="..\Neuraval.Abstractions\Neuraval.Abstractions.csproj" />
+    <ProjectReference Include="..\Neuraval.Tensor\Neuraval.Tensor.csproj" />
   </ItemGroup>
 
 </Project>

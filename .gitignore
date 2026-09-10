@@ -1,74 +1,17 @@
-# ==== .NET / Visual Studio / Rider ====
+## .NET build artifacts
 bin/
 obj/
 *.user
 *.suo
+
+## Rider / VS
 .vs/
 .idea/
-*.userprefs
+*.DotSettings.user
 
-# Resultados de test y cobertura
-[Tt]est[Rr]esult*/
-*.trx
-*.coverage
-*.coveragexml
+## Native CUDA build output
+Neuraval.Cuda.Native/output/
 
-# Publish / packages
-[Pp]ublish/
-*.nupkg
-*.snupkg
-
-# ==== Neuraval.Cuda.Native (CMake / C++) ====
-Neuraval.Cuda.Native/build/
-Neuraval.Cuda.Native/out/
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-*.o
-*.obj
-*.so
-*.dll
-*.dylib
-*.exe
-
-# ==== Neuraval.Samples.DinoGame (MonoGame) ====
-# Salida compilada del pipeline de contenido (.mgcb) -- se regenera del
-# Content.mgcb, no hace falta versionarla.
-Neuraval.Samples.DinoGame/bin/
-Neuraval.Samples.DinoGame/obj/
-**/Content/bin/
-**/Content/obj/
-
-# ==== Checkpoints de entrenamiento (NEAT / MarioBridge) ====
-# Estado binario de una corrida de entrenamiento particular (genomas,
-# generacion, fitness). No es codigo ni configuracion -- es progreso local
-# de cada quien, y ademas puede pesar bastante a medida que crecen los
-# genomas. Si en algun momento queres compartir un checkpoint puntual,
-# agregalo a mano con git add -f.
-checkpoints/
-*.navm
-*.navm.bak
-*.navm.*.incompatible-*
-*.navm.*.corrupto.*
-*.navm.*.header-invalido.*
-*.navm.*.version-*-no-soportada.*
-
-# ==== Savestates de BizHawk ====
-# Viven fuera del repo por defecto (ver SAVESTATE_DIR en mario_bridge.lua),
-# pero por si alguien los guarda adentro por error, no se versionan: son
-# binarios grandes y especificos de la maquina/ROM de cada uno.
-*.state
-*.State
-
-# ==== Datos de entrenamiento grandes ====
-# Si Data/ empieza a tener datasets pesados, mejor no versionarlos por
-# defecto. Los .txt chicos que ya estan trackeados (aritmetica.txt,
-# generico.txt) no se ven afectados por este patron.
-Data/*.bin
-Data/*.csv
-
-# ==== Sistema operativo / editores ====
+## OS
 .DS_Store
 Thumbs.db
-*.swp
-*~
