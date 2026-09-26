@@ -4,6 +4,7 @@ namespace Neuraval.Abstractions
     {
         System,
         User,
-        Assistant
+        Assistant,
+        Tool
     }
 }

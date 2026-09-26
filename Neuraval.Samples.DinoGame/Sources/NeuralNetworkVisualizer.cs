@@ -98,7 +98,7 @@ namespace Neuraval.Samples.DinoGame.Sources
             }
 
             float x = panel.X + panel.Width * xFraction;
-            float top = panel.Y + 42;
+            float top = panel.Y + 62;
             float bottom = panel.Y + panel.Height - 24;
             float step = count > 1 ? (bottom - top) / (count - 1) : 0f;
 

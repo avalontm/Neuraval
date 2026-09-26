@@ -1,4 +1,5 @@
 ﻿using Neuraval.Samples.DinoGame.Sources;
+using Neuraval.Samples.DinoGame.Sources.UI;
 using Neuraval.Evolution;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -30,6 +31,12 @@ namespace Neuraval.Samples.DinoGame
         SpriteBatch _spriteBatch;
         StageBackground background;
         SpriteFont font;
+
+        GameState state = GameState.MainMenu;
+        GameState stateBeforeOptions = GameState.MainMenu;
+        Menu mainMenu;
+        Menu optionsMenu;
+        Menu pauseMenu;
 
         // Todos los parametros de poblacion/evolucion/dificultad se cargan
         // desde JSON (se crea con valores por defecto la primera vez que se
@@ -144,6 +151,84 @@ namespace Neuraval.Samples.DinoGame
             }
 
             alive = players.Count;
+
+            BuildMenus();
+        }
+
+        void BuildMenus()
+        {
+            mainMenu = new Menu(new[]
+            {
+                new MenuItem("Nuevo Juego", StartGame),
+                new MenuItem("Opciones", OpenOptions),
+                new MenuItem("Salir", () => Exit())
+            });
+
+            optionsMenu = new Menu(new[]
+            {
+                new MenuItem(() => $"Pantalla completa: {(_graphics.IsFullScreen ? "ON" : "OFF")}", ToggleFullscreen),
+                new MenuItem(() => $"HUD de depuracion: {(IsDebug ? "ON" : "OFF")}", ToggleDebugHud),
+                new MenuItem(() => $"Red neuronal: {(showBrainViz ? "ON" : "OFF")}", ToggleBrainViz),
+                new MenuItem("Volver", CloseOptions)
+            });
+
+            pauseMenu = new Menu(new[]
+            {
+                new MenuItem("Continuar", ResumeGame),
+                new MenuItem("Opciones", OpenOptions),
+                new MenuItem("Menu Principal", GoToMainMenu),
+                new MenuItem("Salir", () => Exit())
+            });
+        }
+
+        void StartGame()
+        {
+            state = GameState.Playing;
+        }
+
+        void OpenOptions()
+        {
+            stateBeforeOptions = state;
+            optionsMenu.Reset();
+            state = GameState.Options;
+        }
+
+        void CloseOptions()
+        {
+            state = stateBeforeOptions;
+        }
+
+        void PauseGame()
+        {
+            pauseMenu.Reset();
+            state = GameState.Paused;
+        }
+
+        void ResumeGame()
+        {
+            state = GameState.Playing;
+        }
+
+        void GoToMainMenu()
+        {
+            mainMenu.Reset();
+            state = GameState.MainMenu;
+        }
+
+        void ToggleFullscreen()
+        {
+            _graphics.IsFullScreen = !_graphics.IsFullScreen;
+            _graphics.ApplyChanges();
+        }
+
+        void ToggleDebugHud()
+        {
+            IsDebug = !IsDebug;
+        }
+
+        void ToggleBrainViz()
+        {
+            showBrainViz = !showBrainViz;
         }
 
         protected override void Update(GameTime gameTime)
@@ -153,6 +238,36 @@ namespace Neuraval.Samples.DinoGame
 
             InputManager.GetState();
 
+            switch (state)
+            {
+                case GameState.MainMenu:
+                    mainMenu.Update();
+                    break;
+
+                case GameState.Options:
+                    optionsMenu.Update();
+                    if (InputManager.IsKeyPressed(Keys.Escape, true))
+                    {
+                        CloseOptions();
+                    }
+                    break;
+
+                case GameState.Paused:
+                    pauseMenu.Update();
+                    if (InputManager.IsKeyPressed(Keys.Escape, true))
+                    {
+                        ResumeGame();
+                    }
+                    break;
+
+                case GameState.Playing:
+                    UpdateGameplay(gameTime);
+                    break;
+            }
+        }
+
+        void UpdateGameplay(GameTime gameTime)
+        {
             if (GameOver)
             {
                 if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed
@@ -162,6 +277,14 @@ namespace Neuraval.Samples.DinoGame
                 {
                     GameStart();
                 }
+
+                return;
+            }
+
+            if (InputManager.IsKeyPressed(Keys.Escape, true))
+            {
+                PauseGame();
+                return;
             }
 
             if (InputManager.IsKeyPressed( Keys.F1, true))
@@ -296,9 +419,36 @@ namespace Neuraval.Samples.DinoGame
 
         protected override void Draw(GameTime gameTime)
         {
-            GraphicsDevice.Clear(Color.White);
+            bool menuBackdrop = state == GameState.MainMenu || state == GameState.Options;
+            GraphicsDevice.Clear(menuBackdrop ? Color.Black : Color.White);
             _spriteBatch.Begin();
 
+            switch (state)
+            {
+                case GameState.MainMenu:
+                    DrawMainMenuScreen();
+                    break;
+
+                case GameState.Options:
+                    DrawOptionsScreen();
+                    break;
+
+                case GameState.Paused:
+                    DrawGameplay();
+                    DrawPauseScreen();
+                    break;
+
+                case GameState.Playing:
+                    DrawGameplay();
+                    break;
+            }
+
+            _spriteBatch.End();
+            base.Draw(gameTime);
+        }
+
+        void DrawGameplay()
+        {
             background.Draw(_spriteBatch);
             // TODO: Add your drawing code here
 
@@ -319,11 +469,68 @@ namespace Neuraval.Samples.DinoGame
             {
                 DrawGameOverScreen();
             }
-
-            _spriteBatch.End();
-            base.Draw(gameTime);
         }
 
+        float CenterX(string text, float scale)
+        {
+            return (_graphics.PreferredBackBufferWidth - font.MeasureString(text).X * scale) / 2f;
+        }
+
+        void DrawMainMenuScreen()
+        {
+            int screenW = _graphics.PreferredBackBufferWidth;
+            int screenH = _graphics.PreferredBackBufferHeight;
+
+            string title = "NEURAVAL DINO";
+            string subtitle = "Entrenamiento evolutivo NEAT";
+            float titleScale = 2.4f;
+            float subtitleScale = 1f;
+
+            Vector2 titlePos = new Vector2(CenterX(title, titleScale), screenH * 0.22f);
+            Vector2 subtitlePos = new Vector2(CenterX(subtitle, subtitleScale), titlePos.Y + font.MeasureString(title).Y * titleScale + 12);
+
+            _spriteBatch.DrawString(font, title, titlePos, Color.Gold, 0f, Vector2.Zero, titleScale, SpriteEffects.None, 0f);
+            _spriteBatch.DrawString(font, subtitle, subtitlePos, Color.White, 0f, Vector2.Zero, subtitleScale, SpriteEffects.None, 0f);
+
+            Vector2 menuOrigin = new Vector2(screenW / 2f - 100, screenH * 0.5f);
+            mainMenu.Draw(_spriteBatch, font, menuOrigin, 40f, 1.1f);
+
+            string hint = "Flechas para moverte  -  Enter para elegir";
+            Vector2 hintPos = new Vector2(CenterX(hint, 0.7f), screenH - 40);
+            _spriteBatch.DrawString(font, hint, hintPos, new Color(200, 200, 200), 0f, Vector2.Zero, 0.7f, SpriteEffects.None, 0f);
+        }
+
+        void DrawOptionsScreen()
+        {
+            int screenW = _graphics.PreferredBackBufferWidth;
+            int screenH = _graphics.PreferredBackBufferHeight;
+
+            string title = "OPCIONES";
+            Vector2 titlePos = new Vector2(CenterX(title, 1.8f), screenH * 0.2f);
+            _spriteBatch.DrawString(font, title, titlePos, Color.Gold, 0f, Vector2.Zero, 1.8f, SpriteEffects.None, 0f);
+
+            Vector2 menuOrigin = new Vector2(screenW / 2f - 180, screenH * 0.42f);
+            optionsMenu.Draw(_spriteBatch, font, menuOrigin, 40f, 1f);
+
+            string hint = "Enter para cambiar  -  Esc para volver";
+            Vector2 hintPos = new Vector2(CenterX(hint, 0.7f), screenH - 40);
+            _spriteBatch.DrawString(font, hint, hintPos, new Color(200, 200, 200), 0f, Vector2.Zero, 0.7f, SpriteEffects.None, 0f);
+        }
+
+        void DrawPauseScreen()
+        {
+            int screenW = _graphics.PreferredBackBufferWidth;
+            int screenH = _graphics.PreferredBackBufferHeight;
+
+            DrawManager.DrawLine(_spriteBatch, new Rectangle(0, 0, screenW, screenH), new Color(0, 0, 0, 170));
+
+            string title = "PAUSA";
+            Vector2 titlePos = new Vector2(CenterX(title, 2f), screenH * 0.25f);
+            _spriteBatch.DrawString(font, title, titlePos, Color.Gold, 0f, Vector2.Zero, 2f, SpriteEffects.None, 0f);
+
+            Vector2 menuOrigin = new Vector2(screenW / 2f - 100, screenH * 0.45f);
+            pauseMenu.Draw(_spriteBatch, font, menuOrigin, 40f, 1.1f);
+        }
 
         void Spawn_Enemy()
         {
@@ -381,18 +588,10 @@ namespace Neuraval.Samples.DinoGame
                 }
             }
 
-            _spriteBatch.DrawString(font, $"(Obstaculo) Distancia: {playerTarget.CalculateDistanceToObstacle()}", new Vector2(10, 20), Color.Black);
-            _spriteBatch.DrawString(font, $"(Obstaculo) X: {playerTarget.CalculateObstaclePositionX()}", new Vector2(10, 40), Color.Black);
-            _spriteBatch.DrawString(font, $"(Obstaculo) Y: {playerTarget.CalculateObstaclePositionY()}", new Vector2(10, 60), Color.Black);
-            _spriteBatch.DrawString(font, $"(Obstaculo) Ancho: {playerTarget.CalculateObstacleWidth()}", new Vector2(10, 80), Color.Black);
-            _spriteBatch.DrawString(font, $"(Obstaculo) Alto: {playerTarget.CalculateObstacleHeight()}", new Vector2(10, 100), Color.Black);
-            _spriteBatch.DrawString(font, $"(Dino) Y: {playerTarget.y}", new Vector2(10, 120), Color.Black);
-            _spriteBatch.DrawString(font, $"(Juego) Velocidad: {speed}", new Vector2(10, 140), Color.Black);
-
-            _spriteBatch.DrawString(font, $"Generacion: {generation}", new Vector2(_graphics.PreferredBackBufferWidth - 250, 20), Color.Black);
-            _spriteBatch.DrawString(font, $"Vivos: {alive}", new Vector2(_graphics.PreferredBackBufferWidth - 220, 40), Color.Black);
-            _spriteBatch.DrawString(font, $"Mejor fitness historico: {bestFitnessEver:0}", new Vector2(_graphics.PreferredBackBufferWidth - 340, 60), Color.Black);
-            _spriteBatch.DrawString(font, "[F2] Mostrar/ocultar red neuronal", new Vector2(_graphics.PreferredBackBufferWidth - 340, 80), Color.Black, 0f, Vector2.Zero, 0.8f, SpriteEffects.None, 0f);
+            _spriteBatch.DrawString(font, $"Generacion: {generation}", new Vector2(10, 20), Color.Black);
+            _spriteBatch.DrawString(font, $"Vivos: {alive}", new Vector2(10, 40), Color.Black);
+            _spriteBatch.DrawString(font, $"Mejor fitness historico: {bestFitnessEver:0}", new Vector2(10, 60), Color.Black);
+            _spriteBatch.DrawString(font, "[F2] Mostrar/ocultar red neuronal  -  [Esc] Pausa", new Vector2(10, 80), Color.Black, 0f, Vector2.Zero, 0.8f, SpriteEffects.None, 0f);
         }
 
         /// <summary>
@@ -415,7 +614,7 @@ namespace Neuraval.Samples.DinoGame
             int panelHeight = 420;
             var panelRect = new Rectangle(
                 _graphics.PreferredBackBufferWidth - panelWidth - 20,
-                100,
+                70,
                 panelWidth,
                 panelHeight);
 
