@@ -23,12 +23,33 @@ namespace Neuraval.Samples.DinoGame.Sources
         //Red Reunoral (Inteligencia Artificial)
         NeuralNetwork neuralNetwork;
 
+        // Un solo Random compartido por todos los dinosaurios para el
+        // jitter de la posicion inicial (ver Reset), en vez de instanciar
+        // uno nuevo por dinosaurio en cada reinicio de generacion (hasta
+        // 1000 veces seguidas con PopulationSize por defecto). En .NET
+        // moderno esto no es un bug de semillas duplicadas (Random() ya no
+        // se siembra por reloj), pero sigue siendo asignacion/inicializacion
+        // innecesaria repetida muchas veces por generacion.
+        static readonly Random jitterRandom = new Random();
+
         /// <summary>
         /// Cerebro actual de este dinosaurio. Se expone para poder leerlo
         /// (evaluar/guardar el genoma) y reemplazarlo (<see cref="SetBrain"/>)
         /// cuando el algoritmo genetico construye la siguiente generacion.
         /// </summary>
         public NeuralNetwork Brain => neuralNetwork;
+
+        /// <summary>
+        /// Pide al cerebro de este dinosaurio un snapshot de su ultima
+        /// decision (entradas, activaciones ocultas, salida y pesos), para
+        /// dibujarlo en el HUD (ver <see cref="NeuralNetworkVisualizer"/>).
+        /// Pensado para llamarse sobre un solo dinosaurio por fotograma
+        /// (el que se este depurando), nunca sobre toda la poblacion.
+        /// </summary>
+        public NetworkActivationSnapshot CaptureBrainSnapshot()
+        {
+            return neuralNetwork.GetActivationSnapshot();
+        }
 
         /// <summary>
         /// Puntuacion de aptitud (fitness) de este dinosaurio en la partida
@@ -77,9 +98,7 @@ namespace Neuraval.Samples.DinoGame.Sources
 
         public void Reset()
         {
-            Random rnd = new Random();
-
-            x = MainGame.DinoStartX + rnd.Next(-MainGame.DinoStartXJitter, MainGame.DinoStartXJitter);
+            x = MainGame.DinoStartX + jitterRandom.Next(-MainGame.DinoStartXJitter, MainGame.DinoStartXJitter);
             y = 450;
             w = 80;
             h = 86;

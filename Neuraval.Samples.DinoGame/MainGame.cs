@@ -20,6 +20,13 @@ namespace Neuraval.Samples.DinoGame
         public static bool GameOver = false;
         public static Dino LastPlayer;
         public static bool IsDebug { private set; get; }
+
+        /// <summary>
+        /// Muestra/oculta el panel de "como piensa el Dino" (entradas,
+        /// activaciones ocultas y salida en tiempo real). Activado por
+        /// defecto; se alterna con F2 igual que F1 alterna IsDebug.
+        /// </summary>
+        bool showBrainViz = true;
         SpriteBatch _spriteBatch;
         StageBackground background;
         SpriteFont font;
@@ -162,6 +169,11 @@ namespace Neuraval.Samples.DinoGame
                 IsDebug = !IsDebug;
             }
 
+            if (InputManager.IsKeyPressed(Keys.F2, true))
+            {
+                showBrainViz = !showBrainViz;
+            }
+
             onGameOver();
 
             if (!GameOver)
@@ -224,14 +236,38 @@ namespace Neuraval.Samples.DinoGame
             var brains = players.Select(p => p.Brain).ToList();
             var fitnessScores = players.Select(p => p.Fitness).ToList();
 
-            // Genomas ordenados de mejor a peor fitness, usados tanto para
-            // decidir el guardado en disco como para depuracion.
-            var ranked = players
+            // Solo hace falta exportar (copiar todos los pesos de) los
+            // genomas que realmente se van a guardar en disco: el mejor y,
+            // como mucho, MaxEliteGenomesToSave. Antes se llamaba
+            // ExportGenome() para los 1000 dinos de la poblacion en cada
+            // generacion aunque el 94% se descartara enseguida; ordenar
+            // primero por fitness (sin exportar nada) y exportar solo el
+            // top-K es mucho mas barato para poblaciones grandes.
+            var rankedPlayers = players.OrderByDescending(p => p.Fitness).ToList();
+            int eliteToExport = Math.Min(settings.MaxEliteGenomesToSave, rankedPlayers.Count);
+            var ranked = rankedPlayers
+                .Take(eliteToExport)
                 .Select(p => (Genome: p.Brain.ExportGenome(), Fitness: p.Fitness))
-                .OrderByDescending(pair => pair.Fitness)
                 .ToList();
 
-            var nextGenerationBrains = evolutionStrategy.NextGeneration(brains, fitnessScores);
+            var nextGenerationBrains = evolutionStrategy.NextGeneration(brains, fitnessScores).ToList();
+
+            // El elitismo de evolutionStrategy solo mira el top de ESTA
+            // ronda: si el mejor genoma de toda la sesion tuvo mala suerte
+            // (obstaculos dificiles) y esta ronda no lo igualo ni lo
+            // supero, puede quedar fuera del top y perderse de la
+            // poblacion en vivo para siempre. Antes solo se garantizaba
+            // que sobreviviera al recargar desde disco (ver
+            // DinoEvolutionStore.RebuildPopulation); esto hace que la
+            // misma garantia aplique tambien dentro de una sesion en vivo,
+            // reinyectandolo sin mutar en el ultimo slot de la siguiente
+            // generacion (parte del cupo de "sangre nueva", el que menos
+            // probablemente ya fuera valioso).
+            float bestThisRound = rankedPlayers.Count > 0 ? rankedPlayers[0].Fitness : 0f;
+            if (bestGenomeEver != null && bestThisRound < bestFitnessEver && nextGenerationBrains.Count > 0)
+            {
+                nextGenerationBrains[nextGenerationBrains.Count - 1] = NeuralNetwork.FromGenome(bestGenomeEver);
+            }
 
             for (int i = 0; i < players.Count; i++)
             {
@@ -277,6 +313,7 @@ namespace Neuraval.Samples.DinoGame
             }
 
             DrawDebug();
+            DrawBrainVisualizer();
 
             if (GameOver)
             {
@@ -355,6 +392,34 @@ namespace Neuraval.Samples.DinoGame
             _spriteBatch.DrawString(font, $"Generacion: {generation}", new Vector2(_graphics.PreferredBackBufferWidth - 250, 20), Color.Black);
             _spriteBatch.DrawString(font, $"Vivos: {alive}", new Vector2(_graphics.PreferredBackBufferWidth - 220, 40), Color.Black);
             _spriteBatch.DrawString(font, $"Mejor fitness historico: {bestFitnessEver:0}", new Vector2(_graphics.PreferredBackBufferWidth - 340, 60), Color.Black);
+            _spriteBatch.DrawString(font, "[F2] Mostrar/ocultar red neuronal", new Vector2(_graphics.PreferredBackBufferWidth - 340, 80), Color.Black, 0f, Vector2.Zero, 0.8f, SpriteEffects.None, 0f);
+        }
+
+        /// <summary>
+        /// Dibuja el panel de "como piensa el Dino" para el mismo
+        /// dinosaurio que ya se usa para el resto del HUD de depuracion
+        /// (<see cref="playerTarget"/>, fijado en <see cref="DrawDebug"/>).
+        /// Solo se pide el snapshot a un dinosaurio por fotograma (no a los
+        /// hasta miles de la poblacion), asi que el costo extra es mínimo.
+        /// </summary>
+        void DrawBrainVisualizer()
+        {
+            if (!showBrainViz || GameOver || playerTarget == null || playerTarget.dead)
+            {
+                return;
+            }
+
+            var snapshot = playerTarget.CaptureBrainSnapshot();
+
+            int panelWidth = 360;
+            int panelHeight = 420;
+            var panelRect = new Rectangle(
+                _graphics.PreferredBackBufferWidth - panelWidth - 20,
+                100,
+                panelWidth,
+                panelHeight);
+
+            NeuralNetworkVisualizer.Draw(_spriteBatch, font, snapshot, panelRect);
         }
     }
 }

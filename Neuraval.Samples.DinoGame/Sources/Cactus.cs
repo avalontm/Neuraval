@@ -11,7 +11,7 @@ namespace Neuraval.Samples.DinoGame.Sources
             Random rnd = new Random();
 
             x = 1350;
-            type = (int)rnd.Next(6);
+            type = rnd.Next(6);
 
             if (type < 3)
             {

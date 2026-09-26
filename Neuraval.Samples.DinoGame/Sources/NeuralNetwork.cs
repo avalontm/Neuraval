@@ -27,6 +27,15 @@ namespace Neuraval.Samples.DinoGame.Sources
 
         private FeedForwardNetwork network;
 
+        // Copias baratas (sin asignar memoria nueva en cada fotograma) de
+        // la ultima entrada escalada y la ultima salida cruda, para poder
+        // reconstruir un snapshot de "como piensa" este cerebro bajo
+        // demanda (ver GetActivationSnapshot) sin tener que tocar el
+        // camino caliente de Predict, que se llama una vez por dinosaurio
+        // vivo (hasta miles) en cada fotograma.
+        private readonly float[] lastScaledInput = new float[InputDim];
+        private readonly float[] lastRawOutput = new float[2];
+
         public NeuralNetwork()
         {
             // Sin entrenamiento: cada dinosaurio nace con pesos aleatorios,
@@ -51,27 +60,64 @@ namespace Neuraval.Samples.DinoGame.Sources
             var tensorInput = new float[1, InputDim];
             for (int i = 0; i < InputDim; i++)
             {
-                tensorInput[0, i] = ScaleInput(i, input[i]);
+                float scaled = ScaleInput(i, input[i]);
+                tensorInput[0, i] = scaled;
+                lastScaledInput[i] = scaled;
             }
 
             float[,] output = network.Forward(tensorInput);
 
             // Solo se usan las 2 primeras salidas como decision:
             // [0] = saltar, [1] = agacharse. El resto del vector se descarta.
-            return new float[] { output[0, 0], output[0, 1] };
+            lastRawOutput[0] = output[0, 0];
+            lastRawOutput[1] = output[0, 1];
+            return new float[] { lastRawOutput[0], lastRawOutput[1] };
+        }
+
+        /// <summary>
+        /// Construye un snapshot de solo lectura de la ultima decision de
+        /// este cerebro (entradas escaladas, activaciones ocultas, salida y
+        /// los pesos relevantes) para poder dibujarlo en tiempo real en el
+        /// HUD del juego. Pensado para llamarse una vez por fotograma sobre
+        /// un unico dinosaurio (el que se este depurando), no sobre toda la
+        /// poblacion: por eso las copias de pesos ocurren aqui y no en
+        /// Predict.
+        /// </summary>
+        public NetworkActivationSnapshot GetActivationSnapshot()
+        {
+            return new NetworkActivationSnapshot
+            {
+                Inputs = (float[])lastScaledInput.Clone(),
+                Hidden = network.GetLastHiddenSnapshot(),
+                Outputs = (float[])lastRawOutput.Clone(),
+                InputToHiddenWeights = network.GetWeights1Snapshot(),
+                HiddenToOutputWeights = network.GetOutputWeightsSnapshot(0, 1)
+            };
         }
 
         // La red se inicializa con pesos pequeños (Xavier/Glorot), asi que
         // conviene llevar las magnitudes del juego (pixeles, velocidad) a un
         // rango razonable antes de la primera capa, en vez de pasarlas en
         // crudo como hacia la version anterior.
+        //
+        // Los obstaculos aparecen en x = 1350 (fuera de los 1280px de
+        // pantalla, ver Cactus/Bird) y se acercan hasta x = 0, asi que la
+        // distancia y la posicion X real del obstaculo varian en ese mismo
+        // rango (0 a ~1350), no en el rango ~0-500 de las demas magnitudes
+        // del juego. Dividir estas dos por 500f (como el resto) dejaba la
+        // entrada escalada en ~2.3-2.7 durante buena parte del tiempo que
+        // el obstaculo esta acercandose, muy por fuera del rango pequeño en
+        // el que caen las otras 5 entradas y para el que estan pensados los
+        // pesos iniciales.
+        private const float MaxObstacleSpawnDistance = 1350f;
+
         private static float ScaleInput(int index, float value)
         {
             switch (index)
             {
                 case 0: // distancia al obstaculo (pixeles)
                 case 1: // posicion X del obstaculo (pixeles)
-                    return value / 500f;
+                    return value / MaxObstacleSpawnDistance;
                 case 2: // posicion Y del obstaculo (pixeles)
                 case 5: // posicion Y del dino (pixeles)
                     return value / 480f;

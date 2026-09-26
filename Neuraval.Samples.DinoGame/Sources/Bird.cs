@@ -23,7 +23,7 @@ namespace Neuraval.Samples.DinoGame.Sources
             // type 3 es un pajaro especial (ver mas abajo) que sobreescribe
             // "h" con un valor mucho mayor, asi que se sortea aparte para
             // dejar claro que no es "uno mas" del mismo tamaño.
-            type = (int)rnd.Next(4);
+            type = rnd.Next(4);
 
             switch (type)
             {

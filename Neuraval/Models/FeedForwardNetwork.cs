@@ -152,6 +152,16 @@ namespace Neuraval.Core.Models
             _biasGradients2 = TensorOps.Scale(Neuraval.Tensor.Tensor.FromArray1D(_biasGradients2), scale).ToArray1D();
         }
 
+        // Umbral bajo el cual el bucle sobre pasos de secuencia se ejecuta
+        // directamente en el hilo actual en vez de por Parallel.For. Para
+        // secuencias muy cortas (el caso mas extremo: seqLen=1, como usa
+        // NeuralNetwork.Predict del Dino, llamado hasta miles de veces por
+        // fotograma) el overhead de planificar la TPL para una sola fila
+        // supera por mucho el trabajo real (una multiplicacion 7x8). Para
+        // secuencias largas (entrenamiento del Transformer) el reparto en
+        // paralelo sigue haciendose como antes.
+        private const int SmallSequenceThreshold = 8;
+
         public float[,] Forward(float[,] input)
         {
             int seqLen = input.GetLength(0);
@@ -166,6 +176,7 @@ namespace Neuraval.Core.Models
 
             var device = TensorDeviceSelector.Current;
             var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() };
+            bool runSequentially = seqLen <= SmallSequenceThreshold;
 
             try
             {
@@ -174,7 +185,7 @@ namespace Neuraval.Core.Models
                 var preHidden = TensorOps.MatMulCachedB(inputTensor, _weights1, _weights1Cache);
                 var hiddenTensor = new Neuraval.Tensor.Tensor(new[] { seqLen, _hiddenDim }, device);
 
-                Parallel.For(0, seqLen, parallelOptions, i =>
+                void ComputeHiddenRow(int i)
                 {
                     int rowOffset = i * _hiddenDim;
 
@@ -182,14 +193,26 @@ namespace Neuraval.Core.Models
                     {
                         hiddenTensor.Buffer[rowOffset + j] = ReLU(preHidden.Buffer[rowOffset + j] + _bias1[j]);
                     }
-                });
+                }
+
+                if (runSequentially)
+                {
+                    for (int i = 0; i < seqLen; i++)
+                    {
+                        ComputeHiddenRow(i);
+                    }
+                }
+                else
+                {
+                    Parallel.For(0, seqLen, parallelOptions, ComputeHiddenRow);
+                }
 
                 _lastHidden = hiddenTensor.ToArray2D();
 
                 var preOutput = TensorOps.MatMulCachedB(hiddenTensor, _weights2, _weights2Cache);
                 var outputTensor = new Neuraval.Tensor.Tensor(new[] { seqLen, _embeddingDim }, device);
 
-                Parallel.For(0, seqLen, parallelOptions, i =>
+                void ComputeOutputRow(int i)
                 {
                     int rowOffset = i * _embeddingDim;
 
@@ -197,7 +220,19 @@ namespace Neuraval.Core.Models
                     {
                         outputTensor.Buffer[rowOffset + j] = preOutput.Buffer[rowOffset + j] + _bias2[j];
                     }
-                });
+                }
+
+                if (runSequentially)
+                {
+                    for (int i = 0; i < seqLen; i++)
+                    {
+                        ComputeOutputRow(i);
+                    }
+                }
+                else
+                {
+                    Parallel.For(0, seqLen, parallelOptions, ComputeOutputRow);
+                }
 
                 return outputTensor.ToArray2D();
             }
@@ -402,6 +437,76 @@ namespace Neuraval.Core.Models
             Array.Clear(_biasGradients2, 0, _biasGradients2.Length);
             Array.Clear(_accumulatedBiasGradients1, 0, _accumulatedBiasGradients1.Length);
             Array.Clear(_accumulatedBiasGradients2, 0, _accumulatedBiasGradients2.Length);
+        }
+
+        // ---------------------------------------------------------------
+        // Accesores de solo lectura para visualizacion (no se usan en el
+        // entrenamiento ni en Forward/Backward). Devuelven copias, nunca
+        // los arreglos internos, para que quien los consuma (por ejemplo,
+        // el HUD del juego del Dino) no pueda alterar el estado de la red
+        // por accidente.
+        // ---------------------------------------------------------------
+
+        /// <summary>
+        /// Copia de la fila 0 de la ultima entrada pasada a <see cref="Forward"/>
+        /// (una decision = un solo paso de secuencia). Vacio (ceros) si
+        /// todavia no se llamo a Forward.
+        /// </summary>
+        public float[] GetLastInputSnapshot()
+        {
+            var result = new float[_embeddingDim];
+            if (_lastInput != null)
+            {
+                for (int j = 0; j < _embeddingDim; j++)
+                {
+                    result[j] = _lastInput[0, j];
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Copia de las activaciones (post-ReLU) de la capa oculta en la
+        /// ultima llamada a <see cref="Forward"/>. Vacio (ceros) si todavia
+        /// no se llamo a Forward.
+        /// </summary>
+        public float[] GetLastHiddenSnapshot()
+        {
+            var result = new float[_hiddenDim];
+            if (_lastHidden != null)
+            {
+                for (int j = 0; j < _hiddenDim; j++)
+                {
+                    result[j] = _lastHidden[0, j];
+                }
+            }
+            return result;
+        }
+
+        /// <summary>Copia de la matriz de pesos entrada -&gt; oculta.</summary>
+        public float[,] GetWeights1Snapshot()
+        {
+            return (float[,])_weights1.Clone();
+        }
+
+        /// <summary>
+        /// Copia de las columnas de la matriz de pesos oculta -&gt; salida
+        /// que correspondan a <paramref name="outputIndices"/>, en ese
+        /// orden. Sirve para pedir solo las salidas que de verdad se usan
+        /// (por ejemplo, el Dino solo usa las 2 primeras: saltar/agacharse)
+        /// sin tener que exponer ni copiar toda la matriz de salida.
+        /// </summary>
+        public float[,] GetOutputWeightsSnapshot(params int[] outputIndices)
+        {
+            var result = new float[_hiddenDim, outputIndices.Length];
+            for (int j = 0; j < _hiddenDim; j++)
+            {
+                for (int k = 0; k < outputIndices.Length; k++)
+                {
+                    result[j, k] = _weights2[j, outputIndices[k]];
+                }
+            }
+            return result;
         }
 
         public FeedForwardNetworkState SaveState()
