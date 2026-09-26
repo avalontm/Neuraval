@@ -30,8 +30,6 @@ namespace Neuraval.Samples.DinoGame.Sources
     /// </summary>
     public static class DinoEvolutionStore
     {
-        private const int MaxEliteGenomesToSave = 60;
-
         private static readonly string SaveDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Neuraval.Samples.DinoGame");
@@ -92,7 +90,8 @@ namespace Neuraval.Samples.DinoGame.Sources
             IReadOnlyList<(DinoGenome Genome, float Fitness)> rankedDescending,
             int generation,
             float bestFitnessEver,
-            DinoGenome bestGenomeEver)
+            DinoGenome bestGenomeEver,
+            int maxEliteGenomesToSave)
         {
             float bestThisGeneration = rankedDescending.Count > 0 ? rankedDescending[0].Fitness : 0f;
 
@@ -104,7 +103,7 @@ namespace Neuraval.Samples.DinoGame.Sources
             }
 
             var eliteGenomes = rankedDescending
-                .Take(MaxEliteGenomesToSave)
+                .Take(maxEliteGenomesToSave)
                 .Select(pair =>
                 {
                     pair.Genome.Fitness = pair.Fitness;
@@ -134,7 +133,8 @@ namespace Neuraval.Samples.DinoGame.Sources
             int populationSize,
             Random random,
             float mutationRate,
-            float mutationStrength)
+            float mutationStrength,
+            float randomInjectionFraction)
         {
             var brains = new List<NeuralNetwork>(populationSize);
 
@@ -150,10 +150,14 @@ namespace Neuraval.Samples.DinoGame.Sources
 
             if (seedGenomes.Count > 0)
             {
-                // ~80% de la poblacion se rellena con descendencia mutada de
-                // los genomas guardados, para seguir explorando a partir de
-                // lo ya aprendido.
-                int toBreed = (int)(populationSize * 0.8f);
+                // El resto (salvo la fraccion reservada para sangre nueva)
+                // se rellena con descendencia mutada de los genomas
+                // guardados, para seguir explorando a partir de lo ya
+                // aprendido. randomInjectionFraction es el mismo parametro
+                // que usa la evolucion en vivo (ElitistMutationStrategy),
+                // para que ambos caminos mantengan la misma diversidad
+                // genetica objetivo.
+                int toBreed = (int)(populationSize * (1f - randomInjectionFraction));
 
                 while (brains.Count < toBreed)
                 {

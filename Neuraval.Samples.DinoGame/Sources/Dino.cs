@@ -79,7 +79,7 @@ namespace Neuraval.Samples.DinoGame.Sources
         {
             Random rnd = new Random();
 
-            x = 200 + rnd.Next(-80, 80);
+            x = MainGame.DinoStartX + rnd.Next(-MainGame.DinoStartXJitter, MainGame.DinoStartXJitter);
             y = 450;
             w = 80;
             h = 86;

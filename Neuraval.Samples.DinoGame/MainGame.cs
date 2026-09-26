@@ -24,17 +24,11 @@ namespace Neuraval.Samples.DinoGame
         StageBackground background;
         SpriteFont font;
 
-        const int PopulationSize = 1000;
-
-        // --- Algoritmo genetico ---
-        // Cuantos de los mejores dinosaurios de cada generacion pasan sin
-        // cambios (elitismo): garantiza que nunca se pierde lo que ya
-        // funcionaba bien de una generacion a la siguiente.
-        const int EliteCount = 20;
-        // Probabilidad de que cada peso/bias individual mute al reproducirse.
-        const float MutationRate = 0.12f;
-        // Magnitud (desviacion estandar) de la mutacion gaussiana aplicada.
-        const float MutationStrength = 0.35f;
+        // Todos los parametros de poblacion/evolucion/dificultad se cargan
+        // desde JSON (se crea con valores por defecto la primera vez que se
+        // ejecuta el juego). Ver DinoTrainingSettings para el detalle y la
+        // ruta del archivo.
+        readonly DinoTrainingSettings settings;
 
         readonly Random evolutionRandom = new Random();
         readonly ElitistMutationStrategy<NeuralNetwork> evolutionStrategy;
@@ -47,6 +41,17 @@ namespace Neuraval.Samples.DinoGame
         int generation = 0;
         int alive = 0;
         Dino playerTarget;
+
+        // Tiempo transcurrido desde que empezo la ronda/generacion actual
+        // (se reinicia en GameStart). Antes la rampa de velocidad usaba
+        // gameTime.TotalGameTime, que es el tiempo total desde que arranco
+        // la aplicacion: eso hacia que la dificultad se acelerase mas y mas
+        // rapido en cada generacion sucesiva de una misma sesion larga, sin
+        // relacion alguna con el desempeño de esa ronda, y volvia el fitness
+        // no comparable entre generaciones (la base misma del algoritmo
+        // genetico). Con este contador propio, cada ronda arranca con la
+        // misma rampa de dificultad que todas las demas.
+        double roundElapsedSeconds = 0d;
 
         public MainGame()
         {
@@ -61,9 +66,24 @@ namespace Neuraval.Samples.DinoGame
             Content.RootDirectory = "Content";
             IsMouseVisible = true;
 
+            settings = DinoTrainingSettings.Load();
+            speedStart = settings.SpeedStart;
+            DinoStartX = settings.DinoStartX;
+            DinoStartXJitter = settings.DinoStartXJitter;
+
             evolutionStrategy = new ElitistMutationStrategy<NeuralNetwork>(
-                evolutionRandom, EliteCount, MutationRate, MutationStrength);
+                evolutionRandom, settings.EliteCount, settings.MutationRate, settings.MutationStrength,
+                settings.RandomInjectionFraction, () => new NeuralNetwork());
         }
+
+        /// <summary>
+        /// Posicion X base y variacion aleatoria (+/-) donde arranca cada
+        /// dinosaurio al reiniciar (<see cref="Dino.Reset"/> las lee de
+        /// aqui, igual que ya leia <see cref="speed"/>). Vienen de
+        /// <see cref="DinoTrainingSettings"/>.
+        /// </summary>
+        public static int DinoStartX = 200;
+        public static int DinoStartXJitter = 80;
 
         protected override void Initialize()
         {
@@ -100,7 +120,8 @@ namespace Neuraval.Samples.DinoGame
                 bestGenomeEver = savedData.BestGenomeEver;
 
                 var brains = DinoEvolutionStore.RebuildPopulation(
-                    savedData, PopulationSize, evolutionRandom, MutationRate, MutationStrength);
+                    savedData, settings.PopulationSize, evolutionRandom, settings.MutationRate, settings.MutationStrength,
+                    settings.RandomInjectionFraction);
 
                 foreach (var brain in brains)
                 {
@@ -109,7 +130,7 @@ namespace Neuraval.Samples.DinoGame
             }
             else
             {
-                for (int i = 0; i < PopulationSize; i++)
+                for (int i = 0; i < settings.PopulationSize; i++)
                 {
                     players.Add(new Dino());
                 }
@@ -153,19 +174,27 @@ namespace Neuraval.Samples.DinoGame
                     players[p].Update(gameTime);
                 }
 
-                for (int c = 0; c < enemies.Count; c++)
+                // Se itera hacia atras porque BaseEnemy.Update puede
+                // eliminarse a si mismo de la lista (cuando sale de
+                // pantalla). Iterando hacia adelante, una eliminacion
+                // desplaza los indices siguientes y hace que el elemento
+                // que ocupa el hueco se salte su Update ese frame; iterando
+                // hacia atras, una eliminacion en c nunca afecta a los
+                // indices 0..c-1 que faltan por procesar.
+                for (int c = enemies.Count - 1; c >= 0; c--)
                 {
                     enemies[c].Update(speed);
                 }
 
-                if (every_sec > 60)
+                if (every_sec > settings.EnemySpawnIntervalFrames)
                 {
                     every_sec = 0;
                     Spawn_Enemy();
                 }
 
                 every_sec += 1;
-                speed += (float)(0.00000025f * gameTime.TotalGameTime.TotalSeconds);
+                roundElapsedSeconds += gameTime.ElapsedGameTime.TotalSeconds;
+                speed += (float)(settings.SpeedRampPerSecond * roundElapsedSeconds);
             }
         }
 
@@ -178,6 +207,7 @@ namespace Neuraval.Samples.DinoGame
             generation++;
             every_sec = 0;
             speed = speedStart;
+            roundElapsedSeconds = 0d;
             GameOver = false;
         }
 
@@ -212,7 +242,7 @@ namespace Neuraval.Samples.DinoGame
             // Guarda el progreso en disco despues de cada generacion para
             // que, si se cierra el juego, la proxima vez arranque desde
             // aqui en lugar de perder todo lo aprendido.
-            var saveData = DinoEvolutionStore.BuildSaveData(ranked, generation + 1, bestFitnessEver, bestGenomeEver);
+            var saveData = DinoEvolutionStore.BuildSaveData(ranked, generation + 1, bestFitnessEver, bestGenomeEver, settings.MaxEliteGenomesToSave);
             bestFitnessEver = saveData.BestFitnessEver;
             bestGenomeEver = saveData.BestGenomeEver;
             DinoEvolutionStore.Save(saveData);
@@ -260,7 +290,7 @@ namespace Neuraval.Samples.DinoGame
 
         void Spawn_Enemy()
         {
-            if (probabilidad.GenerarConProbabilidad(20))
+            if (probabilidad.GenerarConProbabilidad(settings.BirdSpawnProbabilityPercent))
             {
                 enemies.Add(new Bird());
             }
