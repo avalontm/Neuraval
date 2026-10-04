@@ -8,11 +8,6 @@ using Neuraval.Abstractions;
 
 namespace Neuraval.ChatBot.Benchmarking
 {
-    /// <summary>
-    /// Corre el mismo conjunto de prompts, en el mismo orden, contra un <see cref="BenchmarkSubject"/>,
-    /// para poder comparar backends (Fase 25 del roadmap: Neuraval Native, Qwen, Gemma, Llama, GPT/API)
-    /// bajo condiciones reproducibles.
-    /// </summary>
     public static class BenchmarkRunner
     {
         public static async Task<BenchmarkReport> RunAsync(

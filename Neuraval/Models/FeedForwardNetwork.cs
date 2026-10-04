@@ -10,6 +10,7 @@ namespace Neuraval.Core.Models
     {
         private readonly int _embeddingDim;
         private readonly int _hiddenDim;
+        private readonly int _outputDim;
         private readonly Random _random;
 
         private float[,] _weights1;
@@ -43,11 +44,13 @@ namespace Neuraval.Core.Models
 
         public int EmbeddingDim => _embeddingDim;
         public int HiddenDim => _hiddenDim;
+        public int OutputDim => _outputDim;
 
-        public FeedForwardNetwork(int embeddingDim, int hiddenDim, int seed = 42)
+        public FeedForwardNetwork(int embeddingDim, int hiddenDim, int seed = 42, int outputDim = 0)
         {
             _embeddingDim = embeddingDim;
             _hiddenDim = hiddenDim;
+            _outputDim = outputDim > 0 ? outputDim : embeddingDim;
             _random = new Random(seed);
 
             InitializeWeights();
@@ -56,33 +59,33 @@ namespace Neuraval.Core.Models
         private void InitializeWeights()
         {
             float limit1 = MathF.Sqrt(6.0f / (_embeddingDim + _hiddenDim));
-            float limit2 = MathF.Sqrt(6.0f / (_hiddenDim + _embeddingDim));
+            float limit2 = MathF.Sqrt(6.0f / (_hiddenDim + _outputDim));
 
             _weights1 = InitializeMatrix(_embeddingDim, _hiddenDim, limit1);
             _bias1 = new float[_hiddenDim];
 
-            _weights2 = InitializeMatrix(_hiddenDim, _embeddingDim, limit2);
-            _bias2 = new float[_embeddingDim];
+            _weights2 = InitializeMatrix(_hiddenDim, _outputDim, limit2);
+            _bias2 = new float[_outputDim];
 
             _gradients1 = new float[_embeddingDim, _hiddenDim];
             _biasGradients1 = new float[_hiddenDim];
 
-            _gradients2 = new float[_hiddenDim, _embeddingDim];
-            _biasGradients2 = new float[_embeddingDim];
+            _gradients2 = new float[_hiddenDim, _outputDim];
+            _biasGradients2 = new float[_outputDim];
 
             _accumulatedGradients1 = new float[_embeddingDim, _hiddenDim];
             _accumulatedBiasGradients1 = new float[_hiddenDim];
 
-            _accumulatedGradients2 = new float[_hiddenDim, _embeddingDim];
-            _accumulatedBiasGradients2 = new float[_embeddingDim];
+            _accumulatedGradients2 = new float[_hiddenDim, _outputDim];
+            _accumulatedBiasGradients2 = new float[_outputDim];
 
             _weights1Optimizer = new AdamMatrixOptimizer(_embeddingDim, _hiddenDim);
             _bias1Optimizer = new AdamVectorOptimizer(_hiddenDim);
-            _weights2Optimizer = new AdamMatrixOptimizer(_hiddenDim, _embeddingDim);
-            _bias2Optimizer = new AdamVectorOptimizer(_embeddingDim);
+            _weights2Optimizer = new AdamMatrixOptimizer(_hiddenDim, _outputDim);
+            _bias2Optimizer = new AdamVectorOptimizer(_outputDim);
 
             _weights1Cache = new CudaWeightCache(_embeddingDim, _hiddenDim);
-            _weights2Cache = new CudaWeightCache(_hiddenDim, _embeddingDim);
+            _weights2Cache = new CudaWeightCache(_hiddenDim, _outputDim);
         }
 
         private float[,] InitializeMatrix(int rows, int cols, float limit)
@@ -152,14 +155,6 @@ namespace Neuraval.Core.Models
             _biasGradients2 = TensorOps.Scale(Neuraval.Tensor.Tensor.FromArray1D(_biasGradients2), scale).ToArray1D();
         }
 
-        // Umbral bajo el cual el bucle sobre pasos de secuencia se ejecuta
-        // directamente en el hilo actual en vez de por Parallel.For. Para
-        // secuencias muy cortas (el caso mas extremo: seqLen=1, como usa
-        // NeuralNetwork.Predict del Dino, llamado hasta miles de veces por
-        // fotograma) el overhead de planificar la TPL para una sola fila
-        // supera por mucho el trabajo real (una multiplicacion 7x8). Para
-        // secuencias largas (entrenamiento del Transformer) el reparto en
-        // paralelo sigue haciendose como antes.
         private const int SmallSequenceThreshold = 8;
 
         public float[,] Forward(float[,] input)
@@ -210,13 +205,13 @@ namespace Neuraval.Core.Models
                 _lastHidden = hiddenTensor.ToArray2D();
 
                 var preOutput = TensorOps.MatMulCachedB(hiddenTensor, _weights2, _weights2Cache);
-                var outputTensor = new Neuraval.Tensor.Tensor(new[] { seqLen, _embeddingDim }, device);
+                var outputTensor = new Neuraval.Tensor.Tensor(new[] { seqLen, _outputDim }, device);
 
                 void ComputeOutputRow(int i)
                 {
-                    int rowOffset = i * _embeddingDim;
+                    int rowOffset = i * _outputDim;
 
-                    for (int j = 0; j < _embeddingDim; j++)
+                    for (int j = 0; j < _outputDim; j++)
                     {
                         outputTensor.Buffer[rowOffset + j] = preOutput.Buffer[rowOffset + j] + _bias2[j];
                     }
@@ -348,15 +343,15 @@ namespace Neuraval.Core.Models
                 _lastHiddenBatch = hidden;
 
                 var preOutput = TensorOps.MatMulCachedB(hiddenFlat, _weights2, _weights2Cache);
-                var output = new float[batchSize, seqLen, _embeddingDim];
+                var output = new float[batchSize, seqLen, _outputDim];
 
                 Parallel.For(0, batchSize * seqLen, parallelOptions, flatIndex =>
                 {
                     int b = flatIndex / seqLen;
                     int i = flatIndex % seqLen;
-                    int rowOffset = flatIndex * _embeddingDim;
+                    int rowOffset = flatIndex * _outputDim;
 
-                    for (int j = 0; j < _embeddingDim; j++)
+                    for (int j = 0; j < _outputDim; j++)
                     {
                         output[b, i, j] = preOutput.Buffer[rowOffset + j] + _bias2[j];
                     }
@@ -378,10 +373,6 @@ namespace Neuraval.Core.Models
             int dim = batch.GetLength(2);
             var flat = new float[batchSize * seqLen, dim];
 
-            // batch[b, i, j] y flat[b*seqLen + i, j] comparten el mismo layout
-            // row-major contiguo: aplanar es un único memcpy (mismo caso ya
-            // corregido en TransformerModel.FlattenBatch; esta era una copia
-            // separada del mismo método que había quedado sin migrar).
             System.Buffer.BlockCopy(batch, 0, flat, 0, batchSize * seqLen * dim * sizeof(float));
 
             return flat;
@@ -403,9 +394,6 @@ namespace Neuraval.Core.Models
 
             var gradInput = new float[batchSize, seqLen, _embeddingDim];
 
-            // flatGradInput[b*seqLen + i, j] y gradInput[b, i, j] comparten el
-            // mismo layout row-major contiguo: un único memcpy, no una copia
-            // elemento a elemento (mismo caso que FlattenBatch arriba).
             System.Buffer.BlockCopy(flatGradInput, 0, gradInput, 0, batchSize * seqLen * _embeddingDim * sizeof(float));
 
             return gradInput;
@@ -439,19 +427,6 @@ namespace Neuraval.Core.Models
             Array.Clear(_accumulatedBiasGradients2, 0, _accumulatedBiasGradients2.Length);
         }
 
-        // ---------------------------------------------------------------
-        // Accesores de solo lectura para visualizacion (no se usan en el
-        // entrenamiento ni en Forward/Backward). Devuelven copias, nunca
-        // los arreglos internos, para que quien los consuma (por ejemplo,
-        // el HUD del juego del Dino) no pueda alterar el estado de la red
-        // por accidente.
-        // ---------------------------------------------------------------
-
-        /// <summary>
-        /// Copia de la fila 0 de la ultima entrada pasada a <see cref="Forward"/>
-        /// (una decision = un solo paso de secuencia). Vacio (ceros) si
-        /// todavia no se llamo a Forward.
-        /// </summary>
         public float[] GetLastInputSnapshot()
         {
             var result = new float[_embeddingDim];
@@ -465,11 +440,6 @@ namespace Neuraval.Core.Models
             return result;
         }
 
-        /// <summary>
-        /// Copia de las activaciones (post-ReLU) de la capa oculta en la
-        /// ultima llamada a <see cref="Forward"/>. Vacio (ceros) si todavia
-        /// no se llamo a Forward.
-        /// </summary>
         public float[] GetLastHiddenSnapshot()
         {
             var result = new float[_hiddenDim];
@@ -483,19 +453,11 @@ namespace Neuraval.Core.Models
             return result;
         }
 
-        /// <summary>Copia de la matriz de pesos entrada -&gt; oculta.</summary>
         public float[,] GetWeights1Snapshot()
         {
             return (float[,])_weights1.Clone();
         }
 
-        /// <summary>
-        /// Copia de las columnas de la matriz de pesos oculta -&gt; salida
-        /// que correspondan a <paramref name="outputIndices"/>, en ese
-        /// orden. Sirve para pedir solo las salidas que de verdad se usan
-        /// (por ejemplo, el Dino solo usa las 2 primeras: saltar/agacharse)
-        /// sin tener que exponer ni copiar toda la matriz de salida.
-        /// </summary>
         public float[,] GetOutputWeightsSnapshot(params int[] outputIndices)
         {
             var result = new float[_hiddenDim, outputIndices.Length];
@@ -539,11 +501,12 @@ namespace Neuraval.Core.Models
 
         public static FeedForwardNetwork LoadState(FeedForwardNetworkState state)
         {
-            var network = new FeedForwardNetwork(state.EmbeddingDim, state.HiddenDim);
+            int outputDim = InferOutputDim(state);
+            var network = new FeedForwardNetwork(state.EmbeddingDim, state.HiddenDim, outputDim: outputDim);
 
             network._weights1 = UnflattenMatrix(state.Weights1, state.EmbeddingDim, state.HiddenDim);
             network._bias1 = (float[])state.Bias1.Clone();
-            network._weights2 = UnflattenMatrix(state.Weights2, state.HiddenDim, state.EmbeddingDim);
+            network._weights2 = UnflattenMatrix(state.Weights2, state.HiddenDim, outputDim);
             network._bias2 = (float[])state.Bias2.Clone();
 
             if (state.Weights1OptimizerState != null) network._weights1Optimizer.LoadStateInto(state.Weights1OptimizerState);
@@ -564,6 +527,16 @@ namespace Neuraval.Core.Models
             System.Buffer.BlockCopy(array, 0, matrix, 0, array.Length * sizeof(float));
 
             return matrix;
+        }
+
+        private static int InferOutputDim(FeedForwardNetworkState state)
+        {
+            if (state.HiddenDim > 0 && state.Weights2 != null && state.Weights2.Length > 0 && state.Weights2.Length % state.HiddenDim == 0)
+            {
+                return state.Weights2.Length / state.HiddenDim;
+            }
+
+            return state.EmbeddingDim;
         }
     }
 

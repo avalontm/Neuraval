@@ -7,15 +7,9 @@ using Neuraval.Core.Services;
 
 namespace Neuraval.Core.Tokenizers
 {
-    // Reconstruye un tokenizer SentencePiece BPE (el usado por Llama/Mistral, declarado en GGUF
-    // como tokenizer.ggml.model = "llama") a partir de vocabulario + scores, sin depender de una
-    // lista explícita de merges: a diferencia de la BPE byte-level de ModernBpeTokenizer (donde
-    // la prioridad de cada par la da su posición en `merges`), acá la prioridad la da el score de
-    // cada token del vocabulario (`tokenizer.ggml.scores`), y en cada paso se fusiona el par
-    // adyacente cuya concatenación exista en el vocabulario con el score más alto.
     public sealed class SentencePieceBpeTokenizer : IChatTokenizer
     {
-        private const string SpaceSymbol = "\u2581"; // "▁", usado por SentencePiece en vez de ' '
+        private const string SpaceSymbol = "\u2581";
 
         private Vocabulary _vocabulary = new();
         private Dictionary<int, float> _scores = new();
@@ -162,28 +156,7 @@ namespace Neuraval.Core.Tokenizers
         public int[] EncodeChat(IReadOnlyList<ChatMessage> messages, ChatTemplateDefinition? template = null, bool addGenerationPrompt = true)
         {
             var rendered = ChatTemplateEngine.Render(messages, template, addGenerationPrompt);
-
-            if (template?.RawJinjaTemplate != null)
-            {
-                // El chat_template real del GGUF decide por su cuenta dónde va el BOS
-                // (normalmente vía "{{ bos_token }}"), así que acá no podemos anteponer
-                // StartToken a ciegas como en el camino "legacy" de abajo: eso
-                // duplicaría el BOS en modelos cuyo template ya lo incluye. En vez de
-                // eso, tokenizamos reconociendo los tokens especiales literales (<s>,
-                // </s>, <|im_start|>, etc.) -- un merge score-based normal casi nunca
-                // reconstruye esos tokens de forma fiable a partir de texto plano -- y
-                // solo agregamos BOS si no quedó ya como primer token.
-                return EncodeRenderedChatText(rendered);
-            }
-
-            // BUGFIX: antes se devolvía EncodeToIds(rendered) directo, sin token de
-            // inicio (BOS). Modelos tipo Llama/Mistral fueron entrenados para ver
-            // siempre BOS como primer token de la secuencia; sin él, el primer
-            // forward pass queda fuera de distribución y la generación degenera
-            // en ruido (tokens random de vocabularios/idiomas sin relación).
-            var ids = new List<int> { StartToken };
-            ids.AddRange(EncodeToIds(rendered));
-            return ids.ToArray();
+            return EncodeRenderedChatText(rendered);
         }
 
         private int[] EncodeRenderedChatText(string renderedText)
@@ -200,9 +173,6 @@ namespace Neuraval.Core.Tokenizers
                     continue;
                 }
 
-                // El prefijo de espacio de SentencePiece se aplica una sola vez al
-                // principio de la secuencia real, no en cada fragmento de texto plano
-                // que quedó separado por un token especial en el medio.
                 ids.AddRange(EncodeToIds(segment.Text, applyDummyPrefix: isFirstPlainSegment));
                 isFirstPlainSegment = false;
             }
@@ -273,17 +243,11 @@ namespace Neuraval.Core.Tokenizers
 
         private bool IsControlToken(int id)
         {
-            return _tokenTypes.TryGetValue(id, out var type) && type == 3; // LLAMA_TOKEN_TYPE_CONTROL
+            return _tokenTypes.TryGetValue(id, out var type) && type == 3;
         }
 
         private bool IsSpecialOrControlToken(int id)
         {
-            // Antes acá solo se comparaba el texto del token contra los placeholders
-            // internos de SpecialTokens ("<|bos|>", etc.), que para un vocabulario
-            // cargado desde un GGUF real casi nunca coinciden con el literal propio
-            // del modelo ("<s>", "<|im_end|>", ...). Se decide por ID en vez de por
-            // texto para que esto funcione igual con vocabularios entrenados
-            // internamente y con los que vienen de un GGUF.
             return id == PadToken || id == UnknownToken || id == StartToken || id == EndToken
                 || id == SepToken || id == ImStartToken || id == ImEndToken
                 || IsControlToken(id);

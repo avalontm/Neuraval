@@ -3,21 +3,6 @@ using System.Text;
 
 namespace Neuraval.Core.Tokenizers
 {
-    /// <summary>
-    /// Divide un texto ya renderizado por un chat_template en segmentos de
-    /// texto plano y "tokens especiales" reconocidos literalmente (p.ej.
-    /// "&lt;s&gt;", "&lt;/s&gt;", "&lt;|im_start|&gt;").
-    ///
-    /// Esto hace falta porque un tokenizer BPE/SentencePiece normal NO
-    /// reconstruye de forma fiable estos tokens a partir de su representación
-    /// de texto: el algoritmo de merges/scores no está garantizado a
-    /// recombinar "&lt;", "s", "&gt;" de vuelta en el token atómico "&lt;s&gt;", y aunque
-    /// lo lograra, normalizaciones como el prefijo de espacio de SentencePiece
-    /// romperían el resultado. Hay que reconocer estos tokens como unidades
-    /// atómicas ANTES de tokenizar el resto del texto, igual que hacen
-    /// llama.cpp/HuggingFace al tokenizar "con tokens especiales habilitados"
-    /// (parse_special=true).
-    /// </summary>
     public readonly struct SpecialTokenSegment
     {
         public bool IsSpecial { get; }
@@ -47,9 +32,6 @@ namespace Neuraval.Core.Tokenizers
                 return result;
             }
 
-            // Se prueban primero los candidatos más largos para que, por ejemplo,
-            // "<|im_end|>" no quede parcialmente capturado por un token más corto
-            // que resulte ser prefijo suyo.
             var ordered = new List<string>(specialTokens.Keys);
             ordered.Sort((a, b) => b.Length.CompareTo(a.Length));
 

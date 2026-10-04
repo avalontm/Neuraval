@@ -136,7 +136,6 @@ namespace Neuraval.Tests
 
             var rendered = ChatTemplateEngine.Render(messages, ChatTemplateDefinition.Mistral(), addGenerationPrompt: false);
 
-            // No debe aparecer como turno propio: Mistral clásico no tiene rol "system".
             Assert.DoesNotContain("[INST] Sos un asistente útil. [/INST]", rendered);
             Assert.Contains("Sos un asistente útil.", rendered);
             Assert.Contains("Hola", rendered);
@@ -168,8 +167,6 @@ namespace Neuraval.Tests
             var withPrompt = ChatTemplateEngine.Render(messages, ChatTemplateDefinition.Mistral(), addGenerationPrompt: true);
             var withoutPrompt = ChatTemplateEngine.Render(messages, ChatTemplateDefinition.Mistral(), addGenerationPrompt: false);
 
-            // "[/INST]" ya invita al modelo a continuar; a diferencia de ChatML,
-            // Mistral no agrega ningún tag extra de rol para el turno del assistant.
             Assert.Equal(withPrompt, withoutPrompt);
         }
     }

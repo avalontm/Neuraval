@@ -3,11 +3,6 @@ using System.Text.Json.Serialization;
 
 namespace Neuraval.CLI
 {
-    /// <summary>
-    /// Config para "dotnet run --project Neuraval.CLI -- --chat-benchmark benchmark.json".
-    /// Cada "subject" es un backend a comparar (Fase 25 del roadmap: Neuraval Native,
-    /// Qwen/Gemma/Llama servidos por llama.cpp, GPT/API vía openai-compatible).
-    /// </summary>
     public class BenchmarkCliConfig
     {
         [JsonPropertyName("prompts")]
@@ -26,13 +21,9 @@ namespace Neuraval.CLI
 
     public class BenchmarkSubjectCliConfig
     {
-        /// <summary>Nombre para mostrar en la tabla comparativa (ej. "Qwen 2.5 7B").</summary>
         [JsonPropertyName("name")]
         public string Name { get; set; } = "";
 
-        /// <summary>"native" (modelo Neuraval entrenado localmente), o cualquier backend soportado
-        /// por <see cref="Neuraval.ChatBot.Services.ChatModelFactory.CreateFromConfig"/>
-        /// ("openai-compatible", "llama.cpp", etc.).</summary>
         [JsonPropertyName("backend")]
         public string Backend { get; set; } = "";
 
@@ -45,7 +36,6 @@ namespace Neuraval.CLI
         [JsonPropertyName("api_key")]
         public string ApiKey { get; set; } = "";
 
-        /// <summary>Solo para backend "native": carpeta con model.navm y tokenizer.json.</summary>
         [JsonPropertyName("model_path")]
         public string? ModelPath { get; set; }
 

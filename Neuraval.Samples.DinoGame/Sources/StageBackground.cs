@@ -3,7 +3,6 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace Neuraval.Samples.DinoGame.Sources
 {
-    
     public class StageBackground
     {
         public int x { set; get; }
@@ -24,11 +23,8 @@ namespace Neuraval.Samples.DinoGame.Sources
             h = 28;
         }
 
-
         public void Update(GameTime gameTime)
         {
-
-          
         }
 
         public void Draw(SpriteBatch _spriteBatch)

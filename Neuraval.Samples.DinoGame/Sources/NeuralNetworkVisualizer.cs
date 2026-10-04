@@ -4,17 +4,6 @@ using System;
 
 namespace Neuraval.Samples.DinoGame.Sources
 {
-    /// <summary>
-    /// Dibuja, como panel de HUD, la red neuronal (entrada -&gt; capa
-    /// oculta -&gt; salida) de un <see cref="NetworkActivationSnapshot"/>
-    /// en tiempo real: un nodo por neurona (coloreado segun su activacion)
-    /// y una linea por conexion (verde = peso excitatorio, rojo = peso
-    /// inhibitorio; el grosor/opacidad refleja la magnitud del peso).
-    ///
-    /// Es puramente de lectura/dibujo: no conoce nada del entrenamiento ni
-    /// del algoritmo genetico, solo consume el snapshot que ya calculo
-    /// <see cref="NeuralNetwork.GetActivationSnapshot"/>.
-    /// </summary>
     public static class NeuralNetworkVisualizer
     {
         static readonly string[] InputLabels =
@@ -33,8 +22,6 @@ namespace Neuraval.Samples.DinoGame.Sources
                 return;
             }
 
-            // Fondo semitransparente para que las lineas/nodos resalten
-            // sobre el juego sin tapar del todo lo que hay detras.
             DrawManager.DrawLine(spriteBatch, panel, new Color(15, 15, 20, 165));
             DrawManager.DrawRectOutline(spriteBatch, panel, new Color(255, 255, 255, 90));
 
@@ -46,7 +33,6 @@ namespace Neuraval.Samples.DinoGame.Sources
             Vector2[] hiddenPos = LayoutColumn(panel, 0.52f, hiddenCount);
             Vector2[] outputPos = LayoutColumn(panel, 0.88f, outputCount);
 
-            // Conexiones primero, para que los nodos se dibujen encima.
             for (int i = 0; i < inputCount; i++)
             {
                 for (int j = 0; j < hiddenCount; j++)
@@ -74,9 +60,6 @@ namespace Neuraval.Samples.DinoGame.Sources
                 DrawNode(spriteBatch, font, hiddenPos[j], snapshot.Hidden[j], null, false, false);
             }
 
-            // La decision real del Dino (ver Dino.onIA): solo cuenta si al
-            // menos una señal supera 0; si no, sigue corriendo y ninguna
-            // salida se resalta como "ganadora".
             bool anyActive = snapshot.Outputs[0] > 0f || snapshot.Outputs[1] > 0f;
             int winner = snapshot.Outputs[0] >= snapshot.Outputs[1] ? 0 : 1;
 
@@ -113,15 +96,12 @@ namespace Neuraval.Samples.DinoGame.Sources
 
         static void DrawConnection(SpriteBatch spriteBatch, Vector2 from, Vector2 to, float weight)
         {
-            // Normaliza la magnitud del peso a [0,1] (1.5 cubre con margen
-            // el rango tipico de pesos tras Xavier/Glorot + mutacion) para
-            // que la opacidad/grosor sean comparables entre conexiones.
             float magnitude = MathHelper.Clamp(Math.Abs(weight) / 1.5f, 0f, 1f);
 
             byte alpha = (byte)MathHelper.Clamp(25 + magnitude * 210f, 0f, 255f);
             Color color = weight >= 0f
-                ? new Color((byte)50, (byte)200, (byte)100, alpha)   // excitatorio
-                : new Color((byte)220, (byte)70, (byte)70, alpha);   // inhibitorio
+                ? new Color((byte)50, (byte)200, (byte)100, alpha)
+                : new Color((byte)220, (byte)70, (byte)70, alpha);
 
             float thickness = 1f + magnitude * 2.5f;
             DrawManager.DrawLineSegment(spriteBatch, from, to, color, thickness);
@@ -129,9 +109,6 @@ namespace Neuraval.Samples.DinoGame.Sources
 
         static void DrawNode(SpriteBatch spriteBatch, SpriteFont font, Vector2 center, float activation, string label, bool highlight, bool labelAbove)
         {
-            // Intensidad del color segun que tan lejos de 0 esta la
-            // activacion; 2 cubre con margen el rango tipico de una entrada
-            // escalada o una salida de la ultima capa (activacion lineal).
             float intensity = MathHelper.Clamp(Math.Abs(activation) / 2f, 0f, 1f);
 
             Color fill;

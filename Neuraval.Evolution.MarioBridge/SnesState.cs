@@ -65,37 +65,21 @@ namespace Neuraval.Evolution.MarioBridge
         public int Character { get; }
         public int CurrentPlayerCoins { get; }
 
-        // $7E:1470 "Carrying something flag" y $7E:148F "Flag used to detect if Mario
-        // holds an object" (ver SMW_RAM_Map_IA.md, seccion de items sostenibles).
-        // Distinto de cero mientras Mario esta agarrando/cargando un sprite.
         public int CarryingFlag { get; }
         public int HoldingObjectFlag { get; }
         public bool IsHoldingItem => CarryingFlag != 0 || HoldingObjectFlag != 0;
 
-        // $7E:13CE "Midway Point flag": true el frame en que Mario activo la barra
-        // de punto medio (checkpoint) del nivel actual.
         public int MidwayPointFlag { get; }
         public bool MidwayPointReached => MidwayPointFlag != 0;
 
-        // $7E:1420 "Yoshi Coins collected": contador exacto (0-5+) de monedas
-        // Yoshi recogidas en el nivel actual. Ver SMW_RAM_Map_IA.md.
         public int YoshiCoinsCollected { get; }
 
         public int WallAheadDistance { get; }
         public int SolidAboveDistance { get; }
         public int SolidBelowDistance { get; }
 
-        // $7E:1412 "Vertical scroll flag header": 0 = deshabilitado, 1 = habilitado,
-        // 2 = habilitado condicionalmente (volando/trepando/etc). Se trata como
-        // booleano: distinto de cero implica que el tramo actual admite scroll
-        // vertical. Ver SMW_RAM_Map_IA.md.
         public bool IsVerticalLevel { get; }
 
-        // $1C800/$1D800 tile IDs 0x0137/0x0138 (tiles superiores de tuberia
-        // vertical exit-enabled, confirmado contra el tutorial oficial
-        // "Introduction to Map16" de SMW Central; ver SMW_RAM_Map_IA.md).
-        // Cuenta + dx/dy de la tuberia mas cercana que lleva a otra
-        // seccion/piso al presionar Abajo sobre ella.
         public int PipeNear { get; }
         public int NearestPipeDx { get; }
         public int NearestPipeDy { get; }

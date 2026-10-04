@@ -195,9 +195,6 @@ namespace Neuraval.Tensor
             int cols = source.GetLength(1);
             var tensor = new Tensor(new[] { rows, cols }, device);
 
-            // float[,] rectangular es contiguo row-major en memoria: es el mismo
-            // layout que el Buffer plano del tensor, así que es un memcpy puro
-            // (mismo criterio que TransformerModel.FlattenBatch / AdamMatrixOptimizer.SaveState).
             System.Buffer.BlockCopy(source, 0, tensor.Buffer, 0, tensor.Length * sizeof(float));
 
             return tensor;

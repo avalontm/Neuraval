@@ -46,11 +46,6 @@ namespace Neuraval.Tests
         [Fact]
         public void SampleNext_Greedy_AlsoAppliesRepetitionPenalty()
         {
-            // Regresión: antes el modo greedy ignoraba options.RepetitionPenalty y
-            // devolvía siempre el token de máxima probabilidad cruda, aunque ya se
-            // hubiera generado antes. Eso hace que una generación greedy quede
-            // atrapada repitiendo el mismo fragmento para siempre en cuanto entra
-            // en un ciclo de 1-2 tokens de alta probabilidad.
             var logits = new float[] { 5f, 4f, 0f, 0f };
             var generatedTokenIds = new List<int> { 0 };
             var options = GenerationOptions.Create(true, 1f, 1f, int.MaxValue, 10f, 10, Array.Empty<int>());
@@ -63,8 +58,6 @@ namespace Neuraval.Tests
         [Fact]
         public void SampleNext_Greedy_NoRepetitionPenalty_ReturnsArgMaxEvenIfAlreadyGenerated()
         {
-            // Con penalty == 1f (sin penalización), el comportamiento previo se
-            // conserva: greedy sigue devolviendo el argmax crudo.
             var logits = new float[] { 5f, 4f, 0f, 0f };
             var generatedTokenIds = new List<int> { 0 };
             var options = GenerationOptions.Create(true, 1f, 1f, int.MaxValue, 1f, 10, Array.Empty<int>());

@@ -192,9 +192,6 @@ namespace Neuraval.Tensor
 
             var result = new Tensor(new[] { rows, numCols }, a.Device, a.DType);
 
-            // Cada fila es un bloque contiguo en memoria (row-major); el rango de
-            // columnas pedido también es contiguo dentro de esa fila, así que
-            // alcanza con un memcpy por fila en vez de una copia elemento a elemento.
             for (int i = 0; i < rows; i++)
             {
                 Buffer.BlockCopy(a.Buffer, (i * cols + startCol) * sizeof(float), result.Buffer, i * numCols * sizeof(float), numCols * sizeof(float));
@@ -238,8 +235,6 @@ namespace Neuraval.Tensor
 
             var result = new Tensor(new[] { rows, cols }, batch.Device, batch.DType);
 
-            // batch[batchIndex, *, *] es un bloque contiguo (batch es la dimensión
-            // más externa en el layout row-major), así que es un único memcpy.
             Buffer.BlockCopy(batch.Buffer, batchIndex * sliceSize * sizeof(float), result.Buffer, 0, sliceSize * sizeof(float));
 
             return result;

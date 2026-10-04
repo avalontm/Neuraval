@@ -28,11 +28,6 @@ namespace Neuraval.Core.Models
 
                 for (int i = 0; i < _embeddingDim; i++)
                 {
-                    // El ángulo se calcula en double a propósito (no en float): esto corre una
-                    // sola vez por posición al construir el modelo, no en el hot path de
-                    // entrenamiento/inferencia, así que no cuesta rendimiento, y Math.Pow con
-                    // exponentes que dependen de la posición pierde menos precisión en double.
-                    // Recién al guardar en el buffer del Tensor se castea hacia abajo.
                     double angle = pos / Math.Pow(10000.0, (2.0 * i) / _embeddingDim);
 
                     _encodings.Buffer[rowOffset + i] = i % 2 == 0
@@ -143,8 +138,6 @@ namespace Neuraval.Core.Models
             var embeddingsFlat = new float[batchSize * rowElems];
             System.Buffer.BlockCopy(embeddingsBatch, 0, embeddingsFlat, 0, embeddingsFlat.Length * sizeof(float));
 
-            // Repetimos el bloque de encodings una vez por elemento del batch: son
-            // memcpy contiguos (O(batchSize) copias), no un loop manual por elemento.
             var tiledEncodings = new float[batchSize * rowElems];
             for (int b = 0; b < batchSize; b++)
             {

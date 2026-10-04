@@ -4,17 +4,6 @@ namespace Neuraval.Evolution.MarioBridge
 {
     public static class MarioSpriteNames
     {
-        // Moneda Yoshi (Dragon Coin): inferido con alta confianza por posicion
-        // en la tabla de sprites de SMW (encaja entre $C3 Porcu-Puffer y $C5
-        // Boo Grande jefe, tal como en el mapa de referencia). Verificar en
-        // BizHawk con el visor de sprites si se detecta algo raro en juego.
-        // TODO-VERIFICAR: fuentes publicas de disassembly de SMW (SMW Central)
-        // listan $C4 como "plataforma gris que cae", no como Dragon Coin/Yoshi
-        // Coin. Ademas, en el SMW original la Dragon Coin normalmente NO es un
-        // sprite del generador estandar sino un objeto de Map16 (por eso en
-        // romhacking existe una version "sprite" custom hecha aparte). Antes
-        // de confiar en este ID para logica de fitness, confirmar en BizHawk
-        // que $C4 realmente corresponde a la moneda Yoshi en el build actual.
         public const int YoshiCoinSpriteId = 0xC4;
 
         private static readonly Dictionary<int, string> Known = new()
@@ -146,18 +135,18 @@ namespace Neuraval.Evolution.MarioBridge
 
         private static readonly HashSet<int> Hazardous = new()
         {
-            0x1C, // Bala Bill
-            0x9F, // Banzai Bill
-            0x44, // Torpedo Ted
-            0xA1, // Bola de Bowser
-            0x9E, // Bola y cadena
-            0xB4, // Amoladora
-            0x26, // Thwomp
-            0x27, // Thwimp
-            0x33, // Podoboo
-            0x34, // Bola de fuego de jefe
-            0x1D, // Llama saltarina
-            0x50  // Planta Piranha con fuego
+            0x1C,
+            0x9F,
+            0x44,
+            0xA1,
+            0x9E,
+            0xB4,
+            0x26,
+            0x27,
+            0x33,
+            0x34,
+            0x1D,
+            0x50
         };
 
         public static bool IsHazardous(int type)
@@ -165,8 +154,6 @@ namespace Neuraval.Evolution.MarioBridge
             return Hazardous.Contains(type);
         }
 
-        // Usado por MarioUnknownSpriteLogger para saber si vale la pena
-        // loguear un sprite (si ya tiene nombre, no hay nada que registrar).
         public static bool IsKnown(int type)
         {
             return Known.ContainsKey(type);

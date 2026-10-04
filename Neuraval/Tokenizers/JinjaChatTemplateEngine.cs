@@ -8,34 +8,6 @@ using Neuraval.Abstractions;
 
 namespace Neuraval.Core.Tokenizers
 {
-    /// <summary>
-    /// Intérprete de un subconjunto de Jinja2 suficiente para renderizar la
-    /// gran mayoría de los "chat_template" que traen los GGUF modernos en el
-    /// metadato "tokenizer.chat_template" -- el mismo campo que usan
-    /// transformers y llama.cpp para saber exactamente cómo armar el prompt
-    /// de cada modelo (Llama, Mistral, Qwen/ChatML, Gemma, Phi, DeepSeek,
-    /// Zephyr, etc.).
-    ///
-    /// Antes de esto, Neuraval solo tenía presets hardcodeados (ChatMl,
-    /// Mistral) elegidos por arquitectura, lo cual es una aproximación que
-    /// falla en cuanto un modelo usa una variante distinta del formato que
-    /// "adivinamos". Leer y ejecutar el chat_template real del propio GGUF es
-    /// lo que de verdad generaliza a "la mayoría de los modelos", porque cada
-    /// checkpoint declara ahí exactamente el formato con el que fue
-    /// entrenado/fine-tuneado.
-    ///
-    /// Esto NO es un motor Jinja completo. Deliberadamente no soporta:
-    /// - Macros, imports, herencia de templates ({% extends %}, {% include %}).
-    /// - Filtros de "tool calling" que cambian la forma de los datos
-    ///   (selectattr/rejectattr/map/groupby/sort/unique/tojson).
-    /// - El filtro de bucle inline "{% for x in seq if cond %}" (se ignora la
-    ///   parte "if cond" salvo cuando en realidad es un condicional ternario
-    ///   "A if cond else B" sobre el propio iterable).
-    /// Si el template usa algo no soportado, se lanza
-    /// <see cref="JinjaTemplateException"/> y el llamador (GgufChatModel)
-    /// puede caer de nuevo al preset heurístico por arquitectura en vez de
-    /// romper la carga del modelo.
-    /// </summary>
     public static class JinjaChatTemplateEngine
     {
         public static string Render(
@@ -106,12 +78,6 @@ namespace Neuraval.Core.Tokenizers
         }
     }
 
-    /// <summary>
-    /// Se lanza cuando el chat_template Jinja de un GGUF usa una construcción
-    /// que este motor (deliberadamente parcial) no soporta, o cuando el
-    /// template está mal formado. El llamador puede capturarla para caer de
-    /// nuevo a un preset heurístico en vez de romper la carga del modelo.
-    /// </summary>
     public sealed class JinjaTemplateException : Exception
     {
         public JinjaTemplateException(string message) : base(message)
@@ -123,13 +89,6 @@ namespace Neuraval.Core.Tokenizers
         }
     }
 
-    // =====================================================================
-    // Valor "undefined" de Jinja: falsy, se imprime como cadena vacía, y es
-    // lo que se devuelve al acceder a una variable/atributo que no existe
-    // (en vez de lanzar una excepción), que es exactamente lo que necesitamos
-    // para que ramas de templates sobre "tools"/"name" que ChatMessage no
-    // tiene simplemente se salteen en vez de romper el render.
-    // =====================================================================
     internal sealed class JinjaUndefined
     {
         public static readonly JinjaUndefined Instance = new();
@@ -179,14 +138,6 @@ namespace Neuraval.Core.Tokenizers
         }
     }
 
-    // =====================================================================
-    // Lexer de plantilla: separa el texto crudo en Texto / {{ Output }} /
-    // {% Tag %}, descarta comentarios {# ... #}, y aplica el control de
-    // espacios en blanco de Jinja: tanto los marcadores explícitos "-" como
-    // el comportamiento por defecto que usa HuggingFace al renderizar
-    // chat_template (trim_blocks + lstrip_blocks), sin el cual casi todos los
-    // templates reales quedarían llenos de saltos de línea y espacios de más.
-    // =====================================================================
     internal enum RawKind { Text, Output, Tag }
 
     internal sealed class RawNode
@@ -281,9 +232,6 @@ namespace Neuraval.Core.Tokenizers
 
         private static void ApplyWhitespaceControl(List<InternalToken> tokens)
         {
-            // lstrip_blocks: si un "{% %}"/"{# #}" es lo único (aparte de
-            // espacios/tabs) en su línea, se recorta esa corrida de
-            // espacios/tabs del texto que lo precede.
             for (int i = 0; i < tokens.Count; i++)
             {
                 if (tokens[i].Kind != InternalKind.Tag && tokens[i].Kind != InternalKind.Comment)
@@ -301,8 +249,6 @@ namespace Neuraval.Core.Tokenizers
                 }
             }
 
-            // trim_blocks: se recorta el primer salto de línea inmediatamente
-            // después de un "{% %}"/"{# #}".
             for (int i = 0; i < tokens.Count; i++)
             {
                 if (tokens[i].Kind != InternalKind.Tag && tokens[i].Kind != InternalKind.Comment)
@@ -318,9 +264,6 @@ namespace Neuraval.Core.Tokenizers
                 }
             }
 
-            // Marcadores '-' explícitos: recortan TODO el espacio en blanco
-            // adyacente (incluyendo saltos de línea), sin importar el tipo de
-            // tag, y se aplican encima de lo anterior.
             for (int i = 0; i < tokens.Count; i++)
             {
                 if (tokens[i].Kind == InternalKind.Text)
@@ -335,10 +278,6 @@ namespace Neuraval.Core.Tokenizers
         }
     }
 
-    // =====================================================================
-    // Lexer de expresiones: tokeniza el contenido de un "{{ ... }}" o de una
-    // etiqueta "{% ... %}" en identificadores / números / strings / operadores.
-    // =====================================================================
     internal enum TokType { Ident, Number, String, Op, End }
 
     internal sealed class Token
@@ -435,7 +374,7 @@ namespace Neuraval.Core.Tokenizers
                     if (i >= n)
                         throw new JinjaTemplateException("String sin cerrar en expresión Jinja: " + content);
 
-                    i++; // comilla de cierre
+                    i++;
                     var strValue = sb.ToString();
                     tokens.Add(new Token { Type = TokType.String, Text = strValue, Value = strValue });
                     continue;
@@ -471,9 +410,6 @@ namespace Neuraval.Core.Tokenizers
         }
     }
 
-    // =====================================================================
-    // AST de expresiones.
-    // =====================================================================
     internal enum ExprKind
     {
         Literal, Identifier, Attr, Subscript, Slice, Call, Filter,
@@ -514,11 +450,6 @@ namespace Neuraval.Core.Tokenizers
         public static JinjaExpr ListLiteral(List<JinjaExpr> items) => new() { Kind = ExprKind.ListLiteral, Items = items };
     }
 
-    // =====================================================================
-    // Parser de expresiones (recursive descent, precedencia estilo Jinja2):
-    // ternario < or < and < not < comparación/is/in < concat(~) < + - <
-    // * / // % < unario < filtros(|) < postfijo(.[]()) < primario.
-    // =====================================================================
     internal sealed class JinjaExpressionParser
     {
         private readonly List<Token> _tokens;
@@ -762,8 +693,6 @@ namespace Neuraval.Core.Tokenizers
                 if (!CheckOp(":") && !CheckOp("]"))
                     stop = ParseTernary();
 
-                // Un posible "step" (a[::2]) se consume pero se ignora: no es
-                // común en chat_templates y así no rompemos el parseo del resto.
                 if (MatchOp(":") && !CheckOp("]"))
                     ParseTernary();
             }
@@ -873,9 +802,6 @@ namespace Neuraval.Core.Tokenizers
         }
     }
 
-    // =====================================================================
-    // AST de sentencias + parser de plantilla completo.
-    // =====================================================================
     internal enum StmtKind { Text, Output, For, If, Set, BlockSet }
 
     internal sealed class StmtNode
@@ -985,8 +911,6 @@ namespace Neuraval.Core.Tokenizers
 
                     case "break":
                     case "continue":
-                        // No soportado (poco común en chat_templates): se
-                        // ignora en vez de romper el parseo del resto.
                         _i++;
                         continue;
 
@@ -1000,7 +924,7 @@ namespace Neuraval.Core.Tokenizers
 
         private StmtNode ParseFor(string trimmedTag)
         {
-            _i++; // consumir la etiqueta 'for ...'
+            _i++;
 
             var tokens = JinjaExprLexer.Tokenize(trimmedTag);
             int pos = 0;
@@ -1017,10 +941,6 @@ namespace Neuraval.Core.Tokenizers
 
             ExpectIdentToken(tokens, ref pos, "in");
 
-            // Nota: no soportamos el filtro inline "{% for x in y if cond %}";
-            // se toma todo lo que sigue a 'in' como la expresión iterable
-            // completa (si esa cola es en realidad un ternario "A if c else B"
-            // funciona igual que siempre).
             var remaining = tokens.GetRange(pos, tokens.Count - pos);
             var iterableExpr = new JinjaExpressionParser(remaining).ParseExpression();
 
@@ -1042,7 +962,7 @@ namespace Neuraval.Core.Tokenizers
                 CurrentOrThrow();
             }
 
-            _i++; // consumir 'endfor'
+            _i++;
             return forNode;
         }
 
@@ -1053,7 +973,7 @@ namespace Neuraval.Core.Tokenizers
 
             while (true)
             {
-                _i++; // consumir la etiqueta 'if'/'elif' actual
+                _i++;
 
                 var condTokens = JinjaExprLexer.Tokenize(StripLeadingKeyword(currentTagText));
                 var condExpr = new JinjaExpressionParser(condTokens).ParseExpression();
@@ -1077,7 +997,7 @@ namespace Neuraval.Core.Tokenizers
                     CurrentOrThrow();
                 }
 
-                _i++; // consumir 'endif'
+                _i++;
                 break;
             }
 
@@ -1117,12 +1037,11 @@ namespace Neuraval.Core.Tokenizers
 
             if (eqIdx < 0)
             {
-                // Forma de bloque: {% set nombre %} ... {% endset %}
                 string blockName = ExpectIdentName(tokens, ref pos);
-                _i++; // consumir la etiqueta 'set'
+                _i++;
                 var body = ParseBlock(new HashSet<string> { "endset" });
                 CurrentOrThrow();
-                _i++; // consumir 'endset'
+                _i++;
 
                 return new StmtNode { Kind = StmtKind.BlockSet, SetTargetName = blockName, Body = body };
             }
@@ -1152,7 +1071,7 @@ namespace Neuraval.Core.Tokenizers
 
             var valueExpr = new JinjaExpressionParser(valueTokens).ParseExpression();
 
-            _i++; // consumir la etiqueta 'set'
+            _i++;
 
             return new StmtNode
             {
@@ -1180,10 +1099,6 @@ namespace Neuraval.Core.Tokenizers
         }
     }
 
-    // =====================================================================
-    // Evaluador: ejecuta el AST de sentencias contra un JinjaScope y produce
-    // el texto final.
-    // =====================================================================
     internal static class JinjaEvaluator
     {
         public static void ExecuteBlock(List<StmtNode> nodes, JinjaScope scope, StringBuilder sb)
@@ -1402,11 +1317,6 @@ namespace Neuraval.Core.Tokenizers
         }
     }
 
-    // =====================================================================
-    // Runtime: operaciones sobre los valores dinámicos (object?) que produce
-    // el evaluador -- acceso a miembros/índices, verdad/falsedad al estilo
-    // Python, aritmética, comparaciones, filtros, tests y funciones builtin.
-    // =====================================================================
     internal static class JinjaRuntime
     {
         public static object? GetMember(object? target, string name)
@@ -1757,7 +1667,6 @@ namespace Neuraval.Core.Tokenizers
             var args = callExpr.CallArgs?.Select(a => (a.Name, Value: JinjaEvaluator.Eval(a.Value, scope))).ToList()
                        ?? new List<(string? Name, object? Value)>();
 
-            // Llamada a método: `expr.metodo(args)` (p.ej. `message['content'].strip()`).
             if (calleeExpr.Kind == ExprKind.Attr)
             {
                 var target = JinjaEvaluator.Eval(calleeExpr.Target!, scope);

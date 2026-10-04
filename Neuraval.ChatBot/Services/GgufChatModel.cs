@@ -51,12 +51,6 @@ namespace Neuraval.ChatBot.Services
             var model = GgufModelWeightLoader.Load(file);
             var tokenizer = GgufTokenizerLoader.Load(file);
 
-            // BUGFIX: antes options.ChatTemplate se dejaba en null y ChatTemplateEngine
-            // caía siempre en su default (ChatMl()), sin importar la arquitectura real
-            // del GGUF cargado. Modelos Llama/Mistral no fueron entrenados con el
-            // formato ChatML ("<|im_start|>..."), sino con "[INST] ... [/INST]"; usar
-            // el template equivocado deja al modelo fuera de todo lo que vio en
-            // entrenamiento y la generación sale como ruido, no como texto coherente.
             var architecture = GgufModelLoader.LoadConfig(file).Architecture;
             options ??= new GgufChatModelOptions();
             options.ChatTemplate ??= ResolveChatTemplate(file, tokenizer, architecture);
@@ -64,23 +58,6 @@ namespace Neuraval.ChatBot.Services
             return new GgufChatModel(model, tokenizer, options);
         }
 
-        /// <summary>
-        /// Elige el chat template a usar, en este orden de preferencia:
-        ///
-        /// 1) El "tokenizer.chat_template" (Jinja) que trae el propio GGUF, que es
-        ///    el formato exacto con el que se entrenó/fine-tuneó el modelo -- el
-        ///    mismo campo que usan transformers y llama.cpp. Esto es lo que hace
-        ///    que Neuraval funcione con la gran mayoría de los modelos modernos
-        ///    (Llama, Mistral en sus variantes recientes, Qwen/ChatML, Gemma, Phi,
-        ///    DeepSeek, etc.) en vez de solo con los dos formatos hardcodeados.
-        ///
-        /// 2) Si ese campo no está, o el chat_template usa algo que
-        ///    JinjaChatTemplateEngine (deliberadamente un subconjunto de Jinja2, sin
-        ///    soporte de "tool calling") no puede interpretar, se cae de nuevo a la
-        ///    heurística por arquitectura (Mistral clásico / ChatML) que había antes.
-        ///    Es una aproximación, no un parseo exacto del template real, pero es
-        ///    preferible a romper la carga del modelo.
-        /// </summary>
         private static ChatTemplateDefinition ResolveChatTemplate(GgufFile file, IChatTokenizer tokenizer, string architecture)
         {
             if (file.Metadata.TryGetString("tokenizer.chat_template", out var rawTemplate) && !string.IsNullOrWhiteSpace(rawTemplate))
@@ -91,31 +68,18 @@ namespace Neuraval.ChatBot.Services
 
                 try
                 {
-                    // Se hace una pasada de prueba en la carga (no en cada mensaje del
-                    // chat) para detectar temprano si el template usa algo que este
-                    // motor Jinja no soporta, y así poder caer al preset heurístico
-                    // antes de que el usuario llegue a escribir el primer mensaje.
                     var probeMessages = new List<ChatMessage> { new(ChatRole.User, "probe") };
                     ChatTemplateEngine.Render(probeMessages, candidate, addGenerationPrompt: true);
                     return candidate;
                 }
                 catch (JinjaTemplateException)
                 {
-                    // El chat_template del GGUF usa algo fuera del subconjunto de Jinja
-                    // soportado (tools, macros, filtros avanzados, etc.): se sigue con
-                    // la heurística por arquitectura en vez de romper la carga.
                 }
             }
 
             return ResolveDefaultChatTemplate(architecture);
         }
 
-        /// <summary>
-        /// Heurística por arquitectura para elegir el chat template cuando el GGUF
-        /// no trae "tokenizer.chat_template", o cuando ese template usa algo que
-        /// JinjaChatTemplateEngine no soporta. Es solo una aproximación razonable
-        /// para los formatos más comunes, no un parseo del template real del modelo.
-        /// </summary>
         private static ChatTemplateDefinition ResolveDefaultChatTemplate(string architecture)
         {
             return architecture.ToLowerInvariant() switch
@@ -174,16 +138,6 @@ namespace Neuraval.ChatBot.Services
             }, cancellationToken);
         }
 
-        /// <summary>
-        /// Además del EOS "clásico" del vocabulario, muchos modelos modernos usan un
-        /// token de fin-de-turno propio y distinto (p.ej. Llama 3 "&lt;|eot_id|&gt;",
-        /// Gemma "&lt;end_of_turn&gt;"). Sin tratarlos también como señal de parada, la
-        /// generación no se detiene ahí y sigue de largo hasta MaxNewTokens.
-        /// Se buscan por forma (token de control envuelto en "&lt;| |&gt;" o "&lt; &gt;") más
-        /// contenido ("eot"/"end_of_turn"/"end_of_text"), en vez de por substring
-        /// suelto, para no confundir un token normal del vocabulario que
-        /// casualmente contenga esas letras (p.ej. una subpalabra de "theotherday").
-        /// </summary>
         private static int[] BuildStopTokenIds(IChatTokenizer tokenizer)
         {
             var ids = new HashSet<int> { tokenizer.EndToken, tokenizer.ImEndToken };

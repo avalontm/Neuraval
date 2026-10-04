@@ -252,14 +252,6 @@ namespace Neuraval.Core.Serialization.Gguf
             return result;
         }
 
-        // block_q3_K: byte hmask[32], byte qs[64], byte scales[12], half d -> 256 elementos, 110 bytes.
-        // Los quants base son de 2 bits (qs) y se completan con un tercer bit alto (hmask):
-        // valor = ((qs>>shift)&3) - (bit_alto_apagado ? 4 : 0), en unidades de la escala del
-        // sub-bloque. Las 16 escalas de 6 bits (con signo, offset -32) vienen empaquetadas en
-        // los 12 bytes de `scales` mediante el mismo truco de bit-packing que usa llama.cpp
-        // (ver `dequantize_row_q3_K` en ggml-quants.c): se reinterpretan como 3 uint32 (aux[0..2])
-        // y se reordenan en 4 uint32 (aux[0..3]) cuya representación byte a byte son las 16
-        // escalas con signo.
         private static float[] DequantizeQ3_K(byte[] buffer, int offset, long elementCount)
         {
             const int blockElements = 256;
@@ -332,10 +324,6 @@ namespace Neuraval.Core.Serialization.Gguf
             return result;
         }
 
-        // block_q2_K: byte scales[16], byte qs[64], half d, half dmin -> 256 elementos, 84 bytes.
-        // A diferencia de Q3_K/Q4_K/Q5_K, acá las 16 escalas (4 bits) y 16 "mins" (4 bits) salen
-        // directo de cada byte de `scales` (nibble bajo = escala, nibble alto = min), sin el
-        // bit-packing cruzado entre sub-bloques que usan los otros K-quants.
         private static float[] DequantizeQ2_K(byte[] buffer, int offset, long elementCount)
         {
             const int blockElements = 256;
@@ -419,14 +407,9 @@ namespace Neuraval.Core.Serialization.Gguf
             BinaryPrimitives.WriteUInt32LittleEndian(scaleBytes.Slice(12, 4), newAux3);
         }
 
-        // Tabla de valores no lineales usada por IQ4_NL (idéntica a `kvalues_iq4nl` en ggml).
         private static readonly sbyte[] Iq4NlValues =
             { -127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113 };
 
-        // Extrae escala (6 bits) y "mínimo" (6 bits) empaquetados en el arreglo `scales` de
-        // 12 bytes que comparten Q4_K/Q5_K (ver `get_scale_min_k4` en ggml-quants.c). Los
-        // primeros 4 sub-bloques (j<4) guardan sus 6 bits directo; los últimos 4 (j>=4) reusan
-        // los 2 bits altos de los primeros 4 bytes como bits altos de su propio valor de 6 bits.
         private static void GetScaleMinK4(byte[] buffer, int scalesOffset, int j, out byte scale, out byte min)
         {
             if (j < 4)
@@ -441,7 +424,6 @@ namespace Neuraval.Core.Serialization.Gguf
             }
         }
 
-        // block_q4_K: half d, half dmin, byte scales[12], byte qs[128] -> 256 elementos, 144 bytes.
         private static float[] DequantizeQ4_K(byte[] buffer, int offset, long elementCount)
         {
             const int blockElements = 256;
@@ -491,7 +473,6 @@ namespace Neuraval.Core.Serialization.Gguf
             return result;
         }
 
-        // block_q5_K: half d, half dmin, byte scales[12], byte qh[32], byte qs[128] -> 256 elementos, 176 bytes.
         private static float[] DequantizeQ5_K(byte[] buffer, int offset, long elementCount)
         {
             const int blockElements = 256;
@@ -552,7 +533,6 @@ namespace Neuraval.Core.Serialization.Gguf
             return result;
         }
 
-        // block_q6_K: byte ql[128], byte qh[64], sbyte scales[16], half d -> 256 elementos, 210 bytes.
         private static float[] DequantizeQ6_K(byte[] buffer, int offset, long elementCount)
         {
             const int blockElements = 256;
@@ -613,8 +593,6 @@ namespace Neuraval.Core.Serialization.Gguf
             return result;
         }
 
-        // block_q8_K: float d, sbyte qs[256], short bsums[16] -> 256 elementos, 292 bytes.
-        // bsums solo se usa para productos punto internos de ggml; para descuantizar no hace falta.
         private static float[] DequantizeQ8_K(byte[] buffer, int offset, long elementCount)
         {
             const int blockElements = 256;
@@ -645,8 +623,6 @@ namespace Neuraval.Core.Serialization.Gguf
             return result;
         }
 
-        // block_iq4_nl: half d, byte qs[16] -> 32 elementos, 18 bytes. Cuantización no lineal:
-        // los nibbles indexan la tabla `Iq4NlValues` en vez de restar un punto medio fijo.
         private static float[] DequantizeIq4Nl(byte[] buffer, int offset, long elementCount)
         {
             const int blockElements = 32;

@@ -30,41 +30,17 @@ namespace Neuraval.Evolution.MarioBridge
         public const int DialogSignalCount = 3;
         public const int CliffSignalCount = 4;
 
-        // Bloque dedicado a la Moneda Yoshi (Dragon Coin) mas cercana, igual de
-        // prioritario que el de monedas normales / bloques de moneda. Sin este
-        // bloque, una moneda Yoshi solo aparece en la red si por casualidad cae
-        // entre los 3 sprites mas cercanos (bloque generico de sprites), lo cual
-        // hace que la IA la ignore quando hay enemigos mas cerca. Senales:
-        // [0] cuantas monedas Yoshi hay activas cerca, [1]/[2] dx/dy de la mas
-        // cercana.
         public const int YoshiCoinSignalCount = 3;
 
-        // Bloque para "sostener/tirar items usables": banderas directas de RAM de
-        // si Mario esta cargando algo ahora mismo ($1470 / $148F) mas la posicion
-        // del item agarrable (status $09, "Stationary/Carryable" en $14C8) mas
-        // cercano, para que la red sepa a donde caminar para levantarlo.
-        // [0] CarryingFlag, [1] HoldingObjectFlag, [2] hay item agarrable cerca,
-        // [3]/[4] dx/dy del item agarrable mas cercano.
         public const int CarrySignalCount = 5;
 
-        // Bandera de si Mario acaba de activar el punto medio (checkpoint) del
-        // nivel, la barra que guarda el progreso para el respawn ($13CE).
         public const int CheckpointSignalCount = 1;
 
         public const int WallSignalCount = 3;
         public const float WallDistanceScale = SnesState.GridRadius;
 
-        // Bandera de si el tramo actual admite scroll vertical (torre, subida
-        // larga), leida de $7E:1412. Permite priorizar Arriba/Abajo sobre
-        // Izquierda/Derecha en niveles verticales.
         public const int VerticalLevelSignalCount = 1;
 
-        // Bloque para la tuberia vertical exit-enabled mas cercana ($0137/$0138
-        // en el tilemap), igual de prioritario que el de Yoshi Coin. Solo cubre
-        // tuberias por ahora: la deteccion de puertas queda pendiente de una
-        // fase futura por falta de un ID de Map16 "act as" confirmado para
-        // puertas (ver SMW_RAM_Map_IA.md, seccion 38). [0] cuantas tuberias
-        // hay cerca, [1]/[2] dx/dy de la mas cercana.
         public const int PipeSignalCount = 3;
         public const int LevelSignalCount = 8;
         public const int TileCategorySignalCount = 3;

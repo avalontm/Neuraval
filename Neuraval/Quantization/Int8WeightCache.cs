@@ -2,13 +2,6 @@ using System;
 
 namespace Neuraval.Core.Quantization
 {
-    /// <summary>
-    /// Cachea la versión cuantizada en INT8 de una matriz de pesos para
-    /// inferencia en CPU, análogo a <c>CudaWeightCacheFp16</c> (Fase 4.3) pero
-    /// sin depender de CUDA. Se recuantiza únicamente cuando alguien llama a
-    /// <see cref="Invalidate"/> (típicamente después de <c>UpdateWeights</c>
-    /// o de cargar un estado nuevo), no en cada Forward.
-    /// </summary>
     public sealed class Int8WeightCache
     {
         private readonly int _rows;

@@ -11,9 +11,6 @@ namespace Neuraval.Core.Tokenizers
 
             definition ??= ChatTemplateDefinition.ChatMl();
 
-            // Si el GGUF trae su propio chat_template Jinja (tokenizer.chat_template),
-            // ese es el formato exacto con el que se entrenó/fine-tuneó el modelo, así
-            // que tiene prioridad total sobre los presets heurísticos de abajo.
             if (definition.RawJinjaTemplate != null)
             {
                 return JinjaChatTemplateEngine.Render(
@@ -24,9 +21,6 @@ namespace Neuraval.Core.Tokenizers
                     definition.EosToken ?? string.Empty);
             }
 
-            // Los formatos "por rol" (p.ej. Mistral, con "[INST] ... [/INST]") no
-            // envuelven cada turno igual según el rol, así que necesitan su propio
-            // camino de render en vez del esquema genérico de ChatML de abajo.
             return definition.RoleTemplates != null
                 ? RenderWithRoleTemplates(messages, definition, addGenerationPrompt)
                 : RenderGeneric(messages, definition, addGenerationPrompt);
@@ -57,9 +51,6 @@ namespace Neuraval.Core.Tokenizers
 
         private static string RenderWithRoleTemplates(IReadOnlyList<ChatMessage> messages, ChatTemplateDefinition definition, bool addGenerationPrompt)
         {
-            // El llamador (Render) ya garantizó que RoleTemplates no es null antes
-            // de entrar acá; se guarda en una variable local no-nula para que el
-            // resto del método pueda usarlo sin advertencias de nulabilidad.
             var roleTemplates = definition.RoleTemplates!;
 
             var builder = new System.Text.StringBuilder();
@@ -68,8 +59,6 @@ namespace Neuraval.Core.Tokenizers
 
             foreach (var message in messages)
             {
-                // Formatos como Mistral clásico no tienen turno de "system" propio:
-                // se guarda el contenido y se antepone al primer mensaje de usuario.
                 if (systemPending && message.Role == ChatRole.System)
                 {
                     pendingSystemContent = message.Content;

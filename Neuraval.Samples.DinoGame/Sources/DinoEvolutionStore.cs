@@ -6,13 +6,6 @@ using System.Text.Json;
 
 namespace Neuraval.Samples.DinoGame.Sources
 {
-    /// <summary>
-    /// Datos que se guardan en disco entre partidas: la generacion actual,
-    /// el mejor fitness historico, el mejor genoma jamas visto (para no
-    /// perderlo nunca, ni siquiera si una generacion "empeora" por mutacion)
-    /// y una muestra de los genomas de elite de la ultima generacion (para
-    /// poder reconstruir una poblacion diversa al reabrir el juego).
-    /// </summary>
     public class DinoEvolutionSaveData
     {
         public int Generation { get; set; }
@@ -21,13 +14,6 @@ namespace Neuraval.Samples.DinoGame.Sources
         public List<DinoGenome> EliteGenomes { get; set; } = new List<DinoGenome>();
     }
 
-    /// <summary>
-    /// Persiste y reconstruye la evolucion de la poblacion de dinosaurios en
-    /// disco (carpeta de datos de la aplicacion del usuario), para que al
-    /// cerrar y volver a abrir el juego se conserve todo lo aprendido y la
-    /// poblacion siga evolucionando desde donde se quedo, en vez de arrancar
-    /// siempre desde cero con pesos aleatorios.
-    /// </summary>
     public static class DinoEvolutionStore
     {
         private static readonly string SaveDirectory = Path.Combine(
@@ -38,22 +24,47 @@ namespace Neuraval.Samples.DinoGame.Sources
 
         public static DinoEvolutionSaveData Load()
         {
+            if (!File.Exists(SaveFilePath))
+            {
+                return null;
+            }
+
+            string json;
+
             try
             {
-                if (!File.Exists(SaveFilePath))
-                {
-                    return null;
-                }
+                json = File.ReadAllText(SaveFilePath);
+            }
+            catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
+            {
+                SampleDiagnostics.Warn("dino_evolution.json could not be read", exception);
+                return null;
+            }
 
-                string json = File.ReadAllText(SaveFilePath);
+            try
+            {
                 return JsonSerializer.Deserialize<DinoEvolutionSaveData>(json);
             }
-            catch
+            catch (JsonException exception)
             {
-                // Si el archivo esta corrupto o de una version incompatible,
-                // no debe impedir que el juego arranque: simplemente se
-                // empieza una poblacion nueva, como si fuera la primera vez.
+                SampleDiagnostics.Warn("dino_evolution.json is not valid JSON; a copy is being preserved before the next save overwrites it", exception);
+                PreserveCorruptSave();
                 return null;
+            }
+        }
+
+        private static void PreserveCorruptSave()
+        {
+            string backupPath = Path.Combine(SaveDirectory, $"dino_evolution.corrupt-{DateTime.UtcNow:yyyyMMdd-HHmmss}.json");
+
+            try
+            {
+                File.Copy(SaveFilePath, backupPath, overwrite: true);
+                SampleDiagnostics.Warn($"corrupt evolution save preserved at {backupPath}", null);
+            }
+            catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
+            {
+                SampleDiagnostics.Warn($"corrupt evolution save could not be preserved at {backupPath}", exception);
             }
         }
 
@@ -64,28 +75,41 @@ namespace Neuraval.Samples.DinoGame.Sources
                 Directory.CreateDirectory(SaveDirectory);
                 string json = JsonSerializer.Serialize(data);
 
-                // Escritura atomica: primero a un archivo temporal y luego
-                // se reemplaza, para no dejar un JSON a medio escribir si el
-                // juego se cierra justo durante el guardado.
                 string tempPath = SaveFilePath + ".tmp";
                 File.WriteAllText(tempPath, json);
-                File.Copy(tempPath, SaveFilePath, overwrite: true);
-                File.Delete(tempPath);
+                File.Move(tempPath, SaveFilePath, overwrite: true);
             }
-            catch
+            catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
             {
-                // Persistir la evolucion es "best effort": si falla (por
-                // permisos, disco lleno, etc.) el juego debe poder seguir
-                // jugandose con normalidad en memoria.
+                SampleDiagnostics.Warn("dino_evolution.json could not be written", exception);
             }
         }
 
-        /// <summary>
-        /// Construye los datos a guardar a partir de la generacion que
-        /// acaba de terminar: conserva el mejor genoma historico (aunque la
-        /// generacion actual haya sido peor) y guarda una muestra de los
-        /// mejores genomas de esta generacion para poder repoblar al reabrir.
-        /// </summary>
+        public static bool Delete()
+        {
+            try
+            {
+                if (File.Exists(SaveFilePath))
+                {
+                    File.Delete(SaveFilePath);
+                }
+
+                string tempPath = SaveFilePath + ".tmp";
+
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+
+                return true;
+            }
+            catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
+            {
+                SampleDiagnostics.Warn("dino_evolution.json could not be deleted", exception);
+                return false;
+            }
+        }
+
         public static DinoEvolutionSaveData BuildSaveData(
             IReadOnlyList<(DinoGenome Genome, float Fitness)> rankedDescending,
             int generation,
@@ -120,14 +144,6 @@ namespace Neuraval.Samples.DinoGame.Sources
             };
         }
 
-        /// <summary>
-        /// Reconstruye una poblacion de <paramref name="populationSize"/>
-        /// cerebros a partir de datos guardados: el mejor cerebro historico
-        /// se conserva intacto (garantiza que nunca se pierde lo aprendido),
-        /// y el resto se rellena mezclando clones mutados de los genomas de
-        /// elite guardados con algunos cerebros totalmente nuevos para
-        /// mantener diversidad genetica.
-        /// </summary>
         public static List<NeuralNetwork> RebuildPopulation(
             DinoEvolutionSaveData data,
             int populationSize,
@@ -140,7 +156,6 @@ namespace Neuraval.Samples.DinoGame.Sources
 
             if (data.BestGenomeEver != null)
             {
-                // El mejor de la historia siempre sobrevive sin mutar.
                 brains.Add(NeuralNetwork.FromGenome(data.BestGenomeEver));
             }
 
@@ -150,13 +165,6 @@ namespace Neuraval.Samples.DinoGame.Sources
 
             if (seedGenomes.Count > 0)
             {
-                // El resto (salvo la fraccion reservada para sangre nueva)
-                // se rellena con descendencia mutada de los genomas
-                // guardados, para seguir explorando a partir de lo ya
-                // aprendido. randomInjectionFraction es el mismo parametro
-                // que usa la evolucion en vivo (ElitistMutationStrategy),
-                // para que ambos caminos mantengan la misma diversidad
-                // genetica objetivo.
                 int toBreed = (int)(populationSize * (1f - randomInjectionFraction));
 
                 while (brains.Count < toBreed)
@@ -167,8 +175,6 @@ namespace Neuraval.Samples.DinoGame.Sources
                 }
             }
 
-            // El resto se completa con cerebros nuevos aleatorios, para no
-            // estancar la evolucion en un unico linaje.
             while (brains.Count < populationSize)
             {
                 brains.Add(new NeuralNetwork());

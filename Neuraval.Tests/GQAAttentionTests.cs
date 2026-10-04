@@ -27,11 +27,19 @@ namespace Neuraval.Tests
 
             var attention = new GQAAttention(hiddenSize, numAttentionHeads, numKeyValueHeads, seed: 1);
             var input = RandomInput(1, 3, hiddenSize, seed: 5);
-            var baseline = attention.Forward(input);
 
-            var state = attention.SaveState();
-            state.Wk[0, 0] += 3.0f;
-            var perturbed = GQAAttention.LoadState(state).Forward(input);
+            var identity = new float[hiddenSize, hiddenSize];
+            for (int i = 0; i < hiddenSize; i++)
+                identity[i, i] = 1f;
+
+            var baselineState = attention.SaveState();
+            baselineState.Wo = identity;
+            var baseline = GQAAttention.LoadState(baselineState).Forward(input);
+
+            var perturbedState = attention.SaveState();
+            perturbedState.Wo = identity;
+            perturbedState.Wk[0, 0] += 3.0f;
+            var perturbed = GQAAttention.LoadState(perturbedState).Forward(input);
 
             bool group0Changed = false;
             bool group1Unchanged = true;

@@ -5,17 +5,6 @@ using System.Linq;
 
 namespace Neuraval.Evolution.MarioBridge
 {
-    // La Fase 5 del roadmap pide una prueba concreta de que el agente
-    // "realmente aprendio a jugar" (y no memorizo DP1): que juegue
-    // razonablemente bien en un nivel en el que no fue entrenado
-    // especificamente. Esta clase agrega los resultados de episodios de
-    // --evaluate (nivel, bestX, si completo, causa de muerte) sin ningun
-    // I/O, para poder testear la logica de agregacion sin abrir un socket a
-    // BizHawk (mismo criterio que MarioCurriculum en la Fase 3 y
-    // MarioCaptureSummary): RunEvaluateMode solo la alimenta y la imprime.
-    // No decide por si sola si un nivel es "conocido" o "held-out" — eso lo
-    // sabe el usuario segun con que --level entreno, no algo que el codigo
-    // pueda inferir.
     public sealed class MarioGeneralizationReport
     {
         public sealed class LevelStats

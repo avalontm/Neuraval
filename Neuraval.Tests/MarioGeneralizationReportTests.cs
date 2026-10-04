@@ -5,12 +5,6 @@ using Xunit;
 
 namespace Neuraval.Tests
 {
-    // Cubre la agregacion pura (sin BizHawk) detras de --evaluate: el modo
-    // que la Fase 5 del roadmap necesita para poder medir objetivamente si
-    // un modelo "generaliza" (juega razonablemente bien en un nivel en el
-    // que no entreno) en vez de solo mirar si completa DP1. RunEvaluateMode
-    // solo llama RecordEpisode/PrintTo/ToCsvRows; toda la logica de conteo
-    // vive aca para poder testearla sin abrir un socket.
     public class MarioGeneralizationReportTests
     {
         [Fact]
@@ -30,17 +24,13 @@ namespace Neuraval.Tests
             Assert.Equal(1, stats.DeathsByFall);
             Assert.Equal(0, stats.StepsCapTerminations);
             Assert.Equal(300, stats.BestXMax);
-            Assert.Equal(200f, stats.AverageBestX); // (100+300+200)/3 = 200
+            Assert.Equal(200f, stats.AverageBestX);
             Assert.True(System.Math.Abs(stats.CompletionPercent - 100f / 3f) < 0.01f);
         }
 
         [Fact]
         public void RecordEpisode_TracksMultipleLevelsIndependently()
         {
-            // Este es el caso de uso central de la Fase 5: correr
-            // --evaluate contra un nivel "conocido" (donde entreno) y uno
-            // "held-out" (donde nunca entreno) en la misma corrida, y poder
-            // comparar sus metricas por separado.
             var report = new MarioGeneralizationReport();
 
             report.RecordEpisode(levelIndex: 0, bestX: 4000, completed: true, MarioDeathCause.None, stepsCapReached: false);
@@ -57,7 +47,7 @@ namespace Neuraval.Tests
             Assert.Equal(2, heldOut.Episodes);
             Assert.Equal(0f, heldOut.CompletionPercent);
             Assert.Equal(2, heldOut.DeathsByEnemy);
-            Assert.Equal(165f, heldOut.AverageBestX); // (150+180)/2
+            Assert.Equal(165f, heldOut.AverageBestX);
         }
 
         [Fact]
@@ -65,10 +55,6 @@ namespace Neuraval.Tests
         {
             var report = new MarioGeneralizationReport();
 
-            // Nunca deberia contarse steps-cap si el episodio de hecho
-            // termino por muerte o por completar el nivel (RunEvaluateMode
-            // ya garantiza esta exclusividad antes de llamar RecordEpisode,
-            // pero el agregador la respeta igual si se la pasan mal).
             report.RecordEpisode(levelIndex: 0, bestX: 500, completed: true, MarioDeathCause.None, stepsCapReached: true);
             report.RecordEpisode(levelIndex: 0, bestX: 250, completed: false, MarioDeathCause.None, stepsCapReached: true);
 
@@ -88,8 +74,6 @@ namespace Neuraval.Tests
             report.PrintTo(lines.Add, new[] { "DP1 (conocido)" });
 
             Assert.Contains(lines, line => line.StartsWith("DP1 (conocido)"));
-            // El nivel 2 no tiene label en la lista (solo hay 1 elemento):
-            // debe caer al indice como string, no tirar excepcion.
             Assert.Contains(lines, line => line.StartsWith("2 |"));
         }
 
@@ -107,8 +91,6 @@ namespace Neuraval.Tests
                 levelLabels: new[] { "Nivel, con coma", "Held-out" }).ToList();
 
             Assert.Equal(2, rows.Count);
-            // El label del nivel 0 tiene una coma: debe ir citado entre
-            // comillas para no romper el CSV.
             Assert.Contains("\"Nivel, con coma\"", rows[0]);
             Assert.Contains("Held-out", rows[1]);
             Assert.StartsWith("2026-09-08T12:00:00", rows[0]);

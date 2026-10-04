@@ -8,8 +8,7 @@ using System.Threading.Tasks;
 
 namespace Neuraval.Samples.DinoGame.Sources
 {
-    
-    public class BaseEnemy 
+    public class BaseEnemy
     {
         public int x { set; get; }
         public int y { set; get; }
@@ -22,7 +21,6 @@ namespace Neuraval.Samples.DinoGame.Sources
 
         public BaseEnemy()
         {
-
         }
 
         public virtual void Update(double speed)
@@ -33,9 +31,14 @@ namespace Neuraval.Samples.DinoGame.Sources
             }
         }
 
+        public void SetSpawnX(int spawnX)
+        {
+            x = spawnX;
+            Bounds = new Rectangle(x, y, w, h);
+        }
+
         public virtual void Draw(SpriteBatch _spriteBatch)
         {
-
         }
     }
 }

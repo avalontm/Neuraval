@@ -4,17 +4,6 @@ using System.IO;
 
 namespace Neuraval.Evolution.MarioBridge
 {
-    // Registra, una sola vez por ID y de forma persistente entre corridas,
-    // cualquier sprite.Type que aparezca en el juego real (via BizHawk) y que
-    // MarioSpriteNames todavia no sepa nombrar. La idea es dejar de adivinar
-    // contra documentacion de terceros: despues de unas sesiones de captura
-    // o entrenamiento reales, este archivo dice exactamente que IDs faltan
-    // en el ROM/nivel que se esta usando.
-    //
-    // Deliberadamente NO participa en la logica de fitness ni en el
-    // encoding de estado: es un efecto secundario de solo lectura sobre
-    // SnesState.Sprites/ClusterSprites, pensado para correr en paralelo a
-    // un entrenamiento normal sin cambiar su comportamiento.
     public static class MarioUnknownSpriteLogger
     {
         private static readonly string DefaultLogPath = Path.Combine("checkpoints", "unknown_sprites.log");
@@ -81,16 +70,10 @@ namespace Neuraval.Evolution.MarioBridge
                 }
                 catch (IOException)
                 {
-                    // Si el archivo esta bloqueado o no hay permisos, no vale
-                    // la pena tumbar el entrenamiento por esto: ya se aviso
-                    // por consola, que es lo importante en el momento.
                 }
             }
         }
 
-        // Al arrancar el proceso, precarga los IDs que ya quedaron
-        // registrados en corridas anteriores para no repetir el mismo aviso
-        // sesion tras sesion (el archivo de log actua como memoria persistente).
         private static void EnsureLoadedFromDisk()
         {
             if (_loadedFromDisk)
@@ -117,8 +100,6 @@ namespace Neuraval.Evolution.MarioBridge
 
         private static int? ParseSpriteIdFromLine(string line)
         {
-            // Formato esperado: "... sprite=$XX ...". Si el formato cambia,
-            // en el peor caso se vuelve a loguear el ID (no rompe nada).
             const string marker = "sprite=$";
             var index = line.IndexOf(marker, StringComparison.Ordinal);
             if (index < 0)
@@ -150,7 +131,6 @@ namespace Neuraval.Evolution.MarioBridge
                    $"status={sprite.Status} properties={sprite.Properties}";
         }
 
-        // Util para tests / reinicios manuales de sesion en un mismo proceso.
         public static void ResetSessionCache()
         {
             lock (Lock)

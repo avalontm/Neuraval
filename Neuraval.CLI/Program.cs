@@ -430,10 +430,6 @@ Asistente: el resultado es cuatro");
 
         static void RunInt8Benchmark(string[] args)
         {
-            // Por defecto usa las dimensiones del preset "medium" de 5.2,
-            // que es un tamaño representativo de proyección de atención
-            // (embeddingDim x embeddingDim). Se pueden pasar dimensiones
-            // propias: --int8-benchmark <embeddingDim> <seqLen> <iteraciones>
             int embeddingDim = args.Length > 1 && int.TryParse(args[1], out var d) ? d : 512;
             int seqLen = args.Length > 2 && int.TryParse(args[2], out var s) ? s : 512;
             int iterations = args.Length > 3 && int.TryParse(args[3], out var it) ? it : 20;
@@ -465,7 +461,6 @@ Asistente: el resultado es cuatro");
             var fp32Cache = new CudaWeightCache(embeddingDim, embeddingDim);
             var int8Cache = new Int8WeightCache(embeddingDim, embeddingDim);
 
-            // Un llamado de precalentamiento de cada uno (JIT warm-up), fuera de la medición.
             var fp32Warmup = TensorOps.MatMulCachedB(inputTensor, weights, fp32Cache);
             var int8Warmup = Int8MatMul.MatMulCachedB(inputTensor, weights, int8Cache);
 
@@ -537,10 +532,6 @@ Asistente: el resultado es cuatro");
                     Console.WriteLine("Advertencia: el modelo no figura como entrenado (IsTrained=false). Se cuantiza igual.");
                 }
 
-                // Diagnóstico: error de cuantización sobre la matriz más
-                // grande (embeddings, compartida con la proyección de
-                // salida por weight tying), que es la que más pesa y la más
-                // representativa del impacto en precisión.
                 var embeddings = modelState.EmbeddingState.Embeddings;
                 var quantizedEmbeddings = Int8Quantizer.QuantizeRowSymmetric(
                     embeddings, modelState.EmbeddingState.VocabSize, modelState.EmbeddingState.EmbeddingDim);
@@ -572,12 +563,6 @@ Asistente: el resultado es cuatro");
             }
         }
 
-        /// <summary>
-        /// Habilita LoRA sobre el modelo del <paramref name="chatBot"/> si
-        /// <see cref="TrainingSettings.LoraRank"/> &gt; 0. Es un no-op si el
-        /// modelo ya trae LoRA habilitado (por ejemplo, porque se cargó desde
-        /// un checkpoint que ya lo tenía).
-        /// </summary>
         static void ApplyLoraSettingsIfRequested(TransformerChatBotService chatBot, TrainingSettings settings)
         {
             if (settings.LoraRank <= 0)
@@ -843,14 +828,6 @@ Asistente: el resultado es cuatro");
             public double? GpuMs { get; init; }
         }
 
-        /// <summary>
-        /// Checkpoint 6.3.8: microbenchmark CPU vs GPU para cada una de las operaciones que
-        /// tienen camino GPU-con-fallback (matmul, matmul transpose A/B, softmax por fila,
-        /// layernorm por fila, paso de Adam), a varios tamaños representativos del modelo
-        /// (embeddingDim, hiddenDim, seqLen, vocabSize). No entrena nada: mide cada operación
-        /// aislada, con GC forzado y una iteración de "warmup" antes de cronometrar, para dar
-        /// un umbral de tamaño real a partir del cual conviene activar UseGpu.
-        /// </summary>
         static void RunGpuBenchmark()
         {
             Console.WriteLine("===========================================");
@@ -881,7 +858,7 @@ Asistente: el resultado es cuatro");
 
             double Time(Action action)
             {
-                action(); // warmup, no cuenta (primer kernel launch / primera transferencia son más lentos)
+                action();
 
                 GC.Collect();
                 var sw = Stopwatch.StartNew();
@@ -911,13 +888,10 @@ Asistente: el resultado es cuatro");
                 results.Add(new GpuBenchResult { Op = op, Shape = shape, ElementCount = elementCount, CpuMs = cpuMs, GpuMs = gpuMs });
             }
 
-            // Tamaños representativos: embeddingDim / hiddenDim como en modelos chicos-medianos-grandes,
-            // seqLen típico de entrenamiento por lotes, y vocabSize para la tabla de embeddings.
             int[] embeddingDims = { 64, 128, 256, 512, 1024 };
             int[] seqLens = { 32, 128, 512 };
             int[] vocabSizes = { 500, 5000, 30000 };
 
-            // --- MatMul (A·B): proyecciones Q/K/V/salida (seqLen x embeddingDim) · (embeddingDim x embeddingDim) ---
             foreach (int dim in embeddingDims)
             {
                 foreach (int seqLen in seqLens)
@@ -931,7 +905,6 @@ Asistente: el resultado es cuatro");
                 }
             }
 
-            // --- MatMul transpuesta B (Q·Kᵀ escalado): (seqLen x dim) · (seqLen x dim)ᵀ ---
             foreach (int dim in embeddingDims)
             {
                 foreach (int seqLen in seqLens)
@@ -946,7 +919,6 @@ Asistente: el resultado es cuatro");
                 }
             }
 
-            // --- MatMul transpuesta A (gradiente de pesos, Aᵀ·B): (seqLen x dim)ᵀ · (seqLen x dim) ---
             foreach (int dim in embeddingDims)
             {
                 foreach (int seqLen in seqLens)
@@ -960,7 +932,6 @@ Asistente: el resultado es cuatro");
                 }
             }
 
-            // --- Softmax por fila: una fila por posición de secuencia (o por cabeza), cols = seqLen ---
             foreach (int seqLen in seqLens)
             {
                 var input = RandomMatrix(seqLen, seqLen, rng);
@@ -970,7 +941,6 @@ Asistente: el resultado es cuatro");
                     () => CudaMath.SoftmaxRows(input));
             }
 
-            // --- LayerNorm por fila: cols = embeddingDim ---
             foreach (int dim in embeddingDims)
             {
                 foreach (int seqLen in seqLens)
@@ -985,7 +955,6 @@ Asistente: el resultado es cuatro");
                 }
             }
 
-            // --- Paso de Adam: elemento a elemento sobre pesos de feedforward y tabla de embeddings ---
             foreach (int dim in embeddingDims)
             {
                 int hiddenDim = dim * 4;
@@ -1353,12 +1322,6 @@ Asistente: el resultado es cuatro");
             Console.WriteLine("para las operaciones que multiplican por una matriz de pesos).");
         }
 
-        /// <summary>
-        /// Carga los datos de entrenamiento desde archivos de texto plano (formato
-        /// "Usuario:/Asistente:") ubicados en <paramref name="baseFolder"/>.
-        /// El formato JSON indexado antiguo ya no se lee directamente aquí: conviértelo
-        /// primero con <c>--convert</c> o <c>--convert-all</c>.
-        /// </summary>
         static List<ConversationPair>? LoadTrainingData(string baseFolder)
         {
             try

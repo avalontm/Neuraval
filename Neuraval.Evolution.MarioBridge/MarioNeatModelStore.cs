@@ -53,11 +53,6 @@ namespace Neuraval.Evolution.MarioBridge
             }
             catch (Exception ex)
             {
-                // No dejamos que un fallo al guardar el "mejor modelo" tire
-                // abajo el entrenamiento: el checkpoint principal (que SI
-                // tiene reintentos y ya guardo bien) sigue teniendo el mismo
-                // genoma, y en el proximo generation se vuelve a intentar
-                // guardar este archivo.
                 Console.WriteLine($"No se pudo guardar el modelo ({filePath}): {ex.GetType().Name}: {ex.Message}");
             }
         }

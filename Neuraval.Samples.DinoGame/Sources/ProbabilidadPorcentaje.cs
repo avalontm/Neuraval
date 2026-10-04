@@ -8,11 +8,15 @@ namespace Neuraval.Samples.DinoGame.Sources
 {
     public class ProbabilidadPorcentaje
     {
-        private Random random;
+        private readonly Random random;
 
-        public ProbabilidadPorcentaje()
+        public ProbabilidadPorcentaje() : this(Random.Shared)
         {
-            random = new Random();
+        }
+
+        public ProbabilidadPorcentaje(Random random)
+        {
+            this.random = random ?? throw new ArgumentNullException(nameof(random));
         }
 
         public bool GenerarConProbabilidad(float porcentaje)
@@ -22,7 +26,7 @@ namespace Neuraval.Samples.DinoGame.Sources
                 throw new ArgumentException("El porcentaje debe estar entre 0 y 100.");
             }
 
-            int numeroAleatorio = random.Next(0, 101); // Genera un número aleatorio entre 0 y 100
+            int numeroAleatorio = random.Next(0, 101);
 
             return numeroAleatorio <= porcentaje;
         }

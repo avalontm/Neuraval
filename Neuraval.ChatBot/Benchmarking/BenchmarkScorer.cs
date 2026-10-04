@@ -20,12 +20,6 @@ namespace Neuraval.ChatBot.Benchmarking
         }
     }
 
-    /// <summary>
-    /// Calcula un "benchmark score" (Fase 25) a partir de tokens/seg y latencia, normalizando cada
-    /// reporte contra el mejor valor del grupo. No hay una fórmula universal de "score" para LLMs;
-    /// esta es una combinación simple y explícita (promedio de throughput relativo y latencia relativa),
-    /// pensada para comparar corridas del mismo set de prompts, no como métrica absoluta.
-    /// </summary>
     public static class BenchmarkScorer
     {
         public static IReadOnlyList<BenchmarkScore> ComputeRelativeScores(IReadOnlyList<BenchmarkReport> reports)

@@ -6,11 +6,6 @@ using System.Threading;
 
 namespace Neuraval.Evolution.MarioBridge
 {
-    // Excepcion dedicada para "se rompio la conexion con BizHawk" (timeout,
-    // socket cerrado, error de red al escribir). Separarla de
-    // InvalidOperationException permite que quien llama (Program.cs) sepa
-    // con certeza cuando vale la pena reconectar y reintentar, en vez de
-    // tener que adivinar por el mensaje de texto de una excepcion generica.
     public sealed class SnesBridgeConnectionLostException : Exception
     {
         public SnesBridgeConnectionLostException(string message, Exception? inner = null)
@@ -37,13 +32,6 @@ namespace Neuraval.Evolution.MarioBridge
             _listener = new TcpListener(address, port);
         }
 
-        // shouldAbort se consulta periodicamente mientras se espera la
-        // PRIMERA conexion, igual que en Reconnect(). Sin esto,
-        // AcceptTcpClient() bloquea sin forma de cancelarlo: Ctrl+C sigue
-        // disparando el CancelKeyPress y seteando stopRequested, pero el
-        // proceso nunca llega a leerlo porque esta trabado en el accept, asi
-        // que el mensaje de "deteniendo..." se repite en cada intento sin
-        // que el programa realmente termine.
         public void WaitForBizHawk(Func<bool>? shouldAbort = null)
         {
             _listener.Start();
@@ -61,18 +49,6 @@ namespace Neuraval.Evolution.MarioBridge
             AcceptNext();
         }
 
-        // Se llama cuando ReceiveState()/SendXxx() detecto que se perdio la
-        // conexion (BizHawk/Lua se reinicio, se cerro, o se colgo mas de
-        // ReceiveTimeoutMs). Descarta el socket viejo y se queda esperando
-        // que un NUEVO cliente (el script de Lua reiniciado) se conecte al
-        // mismo listener, que nunca dejo de escuchar. No hace falta volver
-        // a levantar el proceso de entrenamiento entero: la generacion que
-        // se estaba corriendo se puede reintentar apenas vuelva a haber
-        // conexion.
-        //
-        // shouldAbort se consulta periodicamente mientras se espera, para
-        // poder salir limpio si el usuario pidio detener el entrenamiento
-        // (Ctrl+C) mientras BizHawk seguia desconectado.
         public void Reconnect(Func<bool>? shouldAbort = null)
         {
             _stream?.Dispose();
@@ -118,10 +94,6 @@ namespace Neuraval.Evolution.MarioBridge
 
             var state = SnesState.Parse(ReadLine());
 
-            // Efecto secundario de solo lectura: no cambia el estado ni la
-            // logica de fitness/encoding, solo deja constancia en disco de
-            // cualquier sprite que el ROM real muestre y que todavia no
-            // tenga nombre en MarioSpriteNames.
             MarioUnknownSpriteLogger.Track(state);
 
             return state;
@@ -132,10 +104,6 @@ namespace Neuraval.Evolution.MarioBridge
             SendMessage(action.ToWireFormat());
         }
 
-        // levelIndex es opcional para no romper a nadie que siga llamando
-        // SendReset() sin argumentos: sin indice, Lua recarga el nivel que
-        // ya tenia cargado (ver applyAction en mario_bridge.lua). Con
-        // indice, le pide a Lua que cambie de savestate antes de recargar.
         public void SendReset(int? levelIndex = null)
         {
             SendMessage(levelIndex.HasValue ? $"{ResetCommand}:{levelIndex.Value}" : ResetCommand);
@@ -146,10 +114,6 @@ namespace Neuraval.Evolution.MarioBridge
             SendMessage($"{CaptureCommand}:{levelIndex}");
         }
 
-        // Activa/desactiva velocidad maxima en BizHawk (client.speedmode).
-        // Pensado para entrenamiento headless por NEAT, donde no hace falta
-        // ver el juego en tiempo real; no usar durante --capture, porque ahi
-        // se necesita velocidad normal para poder jugar a mano.
         public void SendTurbo(bool enabled)
         {
             SendMessage($"{TurboCommand}:{(enabled ? 1 : 0)}");
@@ -163,13 +127,6 @@ namespace Neuraval.Evolution.MarioBridge
             }
         }
 
-        // Si BizHawk deja de mandar datos por cualquier motivo (se pausa, el
-        // Lua entra en un loop bloqueante que no vuelve a tocar el socket,
-        // se pierde el foco, etc.), sin timeout el stream.Read() de abajo se
-        // queda esperando para siempre: el proceso sigue "vivo" pero nunca
-        // vuelve a guardar un checkpoint, y no aparece ningun error que lo
-        // explique. Con esto, despues de 60s sin datos se tira una
-        // excepcion clara en vez de colgarse en silencio.
         private const int ReceiveTimeoutMs = 60_000;
 
         private void AcceptNext()
@@ -257,15 +214,12 @@ namespace Neuraval.Evolution.MarioBridge
 
         public void Dispose()
         {
-            // Best-effort: si la conexion ya esta rota no tiene sentido que
-            // Dispose() explote por eso, solo queremos liberar los recursos.
             try
             {
                 SendStop();
             }
             catch (SnesBridgeConnectionLostException)
             {
-                // Ignorado a proposito: la conexion ya estaba perdida.
             }
 
             _stream?.Dispose();

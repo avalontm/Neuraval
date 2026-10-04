@@ -4,26 +4,19 @@ using System;
 
 namespace Neuraval.Samples.DinoGame.Sources
 {
-    
     public class Bird : BaseEnemy
     {
-        //Animacion
         int fotogramaActual;
         float tiempoTranscurrido;
-        float tiempoCambioFotograma = 0.1f; // Cambia el fotograma cada 0.1 segundos
+        float tiempoCambioFotograma = 0.1f;
         int totalFotogramas = 2;
 
         public Bird()
         {
-            Random rnd = new Random();
-
-            x = 1350;
+            x = MainGame.SpawnX;
             w = 84;
             h = 40;
-            // type 3 es un pajaro especial (ver mas abajo) que sobreescribe
-            // "h" con un valor mucho mayor, asi que se sortea aparte para
-            // dejar claro que no es "uno mas" del mismo tamaño.
-            type = rnd.Next(4);
+            type = Random.Shared.Next(4);
 
             switch (type)
             {
@@ -37,15 +30,6 @@ namespace Neuraval.Samples.DinoGame.Sources
                     y = 465;
                     break;
                 case 3:
-                    // Pajaro "bajo" (obliga a agacharse): a diferencia de
-                    // los otros tres tipos, su rango vertical de colision
-                    // cubre TODO el arco de salto del dino (desde el pico
-                    // del salto hasta el suelo), asi que saltar nunca lo
-                    // esquiva, sin importar el timing. Agacharse si lo
-                    // esquiva porque baja el perfil de colision del dino
-                    // por debajo de la parte inferior de este pajaro. Este
-                    // es el obstaculo que le da a la evolucion una razon
-                    // real para aprender a usar "agacharse".
                     y = 345;
                     h = 145;
                     break;
@@ -54,14 +38,12 @@ namespace Neuraval.Samples.DinoGame.Sources
             Bounds = new Rectangle(x, y, w, h);
         }
 
-
         void Animation()
         {
             tiempoTranscurrido += (float)MainGame.time.ElapsedGameTime.TotalSeconds;
 
             if (tiempoTranscurrido >= tiempoCambioFotograma)
             {
-                // Cambiar al siguiente fotograma de la animación
                 fotogramaActual = (fotogramaActual + 1) % totalFotogramas;
                 tiempoTranscurrido = 0;
             }

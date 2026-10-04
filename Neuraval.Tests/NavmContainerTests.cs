@@ -787,15 +787,16 @@ namespace Neuraval.Tests
     public class MarioAgentOutputTests
     {
         [Fact]
-        public void OutputCount_IsSeven()
+        public void OutputCount_IsNine()
         {
-            Assert.Equal(7, MarioAgentOutput.Count);
+            Assert.Equal(9, MarioAgentOutput.Count);
+            Assert.Equal(MarioAgentOutput.Count, MarioAgentOutput.RIndex + 1);
         }
 
         [Fact]
         public void ToAction_AllNegative_ReturnsNone()
         {
-            var output = new float[] { -0.5f, -0.5f, -0.5f, -0.5f, -0.5f, -0.5f };
+            var output = Enumerable.Repeat(-0.5f, MarioAgentOutput.Count).ToArray();
             var action = MarioAgentOutput.ToAction(output);
             Assert.Equal(SnesButton.None, action.Buttons);
         }
@@ -803,7 +804,8 @@ namespace Neuraval.Tests
         [Fact]
         public void ToAction_DownPressed()
         {
-            var output = new float[] { -0.1f, -0.1f, -0.1f, -0.1f, -0.1f, 0.9f };
+            var output = Enumerable.Repeat(-0.1f, MarioAgentOutput.Count).ToArray();
+            output[MarioAgentOutput.DownIndex] = 0.9f;
             var action = MarioAgentOutput.ToAction(output);
             Assert.True(action.IsPressed(SnesButton.Down));
             Assert.False(action.IsPressed(SnesButton.B));

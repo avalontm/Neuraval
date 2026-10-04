@@ -7,7 +7,6 @@ OUTPUT_DIR="$SCRIPT_DIR/output"
 echo "Verificando requisitos..."
 echo
 
-# --- 1. GPU NVIDIA presente y driver instalado ---
 if ! command -v nvidia-smi >/dev/null 2>&1; then
     echo "[FALTA] nvidia-smi no encontrado: no se detecta un driver de GPU NVIDIA instalado."
     echo "        Si tenés una GPU NVIDIA, instalá el driver de tu distro o desde nvidia.com/drivers."
@@ -20,7 +19,6 @@ if ! nvidia-smi >/dev/null 2>&1; then
 fi
 echo "[OK] GPU NVIDIA y driver detectados."
 
-# --- 2. nvcc (CUDA Toolkit) en el PATH ---
 if ! command -v nvcc >/dev/null 2>&1; then
     echo "[FALTA] no se encontró 'nvcc' en el PATH."
     echo "        Instalá el CUDA Toolkit (https://developer.nvidia.com/cuda-downloads) y"
@@ -29,7 +27,6 @@ if ! command -v nvcc >/dev/null 2>&1; then
 fi
 echo "[OK] nvcc encontrado."
 
-# --- 3. Compilador de C++ (gcc/g++): nvcc lo necesita por atrás en Linux ---
 if ! command -v gcc >/dev/null 2>&1 && ! command -v g++ >/dev/null 2>&1; then
     echo "[FALTA] no se encontró gcc/g++. nvcc los necesita para compilar en Linux."
     echo "        Instalalos con: sudo apt-get install build-essential"

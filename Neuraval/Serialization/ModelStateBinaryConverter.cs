@@ -6,24 +6,8 @@ using Neuraval.Core.Utils;
 
 namespace Neuraval.Core.Serialization
 {
-    /// <summary>
-    /// Convierte el árbol de objetos <c>*State</c> del modelo (pesos + estado de
-    /// los optimizadores Adam) hacia/desde el layout binario posicional descrito
-    /// en <see cref="ModelBinaryFormat"/>.
-    ///
-    /// Se usan métodos con nombre explícito por tipo (sin genéricos ni reflexión)
-    /// a propósito: el orden exacto de lectura/escritura es lo que define el
-    /// formato, así que conviene que sea fácil de leer y de auditar campo por
-    /// campo. Cada arreglo de <see cref="float"/> se escribe como un bloque de
-    /// memoria crudo (<see cref="Buffer.BlockCopy"/>) en vez de valor por valor,
-    /// que es varias veces más rápido y compacto para matrices grandes.
-    /// </summary>
     internal static class ModelStateBinaryConverter
     {
-        // ---------------------------------------------------------------
-        // Helper: arreglos de floats
-        // ---------------------------------------------------------------
-
         internal static void WriteFloatArray(BinaryWriter writer, float[] array)
         {
             writer.Write(array.Length);
@@ -44,12 +28,6 @@ namespace Neuraval.Core.Serialization
             Buffer.BlockCopy(bytes, 0, array, 0, bytes.Length);
             return array;
         }
-
-        // ---------------------------------------------------------------
-        // AdamMatrixOptimizerState / AdamVectorOptimizerState
-        // (cada estado de optimizador es opcional: se antepone un byte
-        // booleano indicando si está presente o no)
-        // ---------------------------------------------------------------
 
         private static void WriteAdamMatrixOptimizerState(BinaryWriter writer, AdamMatrixOptimizerState state)
         {
@@ -119,10 +97,6 @@ namespace Neuraval.Core.Serialization
             return reader.ReadBoolean() ? ReadAdamVectorOptimizerState(reader) : null;
         }
 
-        // ---------------------------------------------------------------
-        // EmbeddingLayerState
-        // ---------------------------------------------------------------
-
         private static void WriteEmbeddingLayerState(BinaryWriter writer, EmbeddingLayerState state)
         {
             writer.Write(state.VocabSize);
@@ -141,10 +115,6 @@ namespace Neuraval.Core.Serialization
                 OptimizerState = ReadOptionalAdamMatrixOptimizerState(reader)
             };
         }
-
-        // ---------------------------------------------------------------
-        // LayerNormalizationState
-        // ---------------------------------------------------------------
 
         internal static void WriteLayerNormalizationState(BinaryWriter writer, LayerNormalizationState state)
         {
@@ -168,10 +138,6 @@ namespace Neuraval.Core.Serialization
                 BetaOptimizerState = ReadOptionalAdamVectorOptimizerState(reader)
             };
         }
-
-        // ---------------------------------------------------------------
-        // LoraProjectionState / LoraAttentionState (Fase 5.5)
-        // ---------------------------------------------------------------
 
         internal static void WriteLoraProjectionState(BinaryWriter writer, LoraProjectionState state)
         {
@@ -221,10 +187,6 @@ namespace Neuraval.Core.Serialization
             };
         }
 
-        // ---------------------------------------------------------------
-        // MultiHeadAttentionState
-        // ---------------------------------------------------------------
-
         private static void WriteMultiHeadAttentionState(BinaryWriter writer, MultiHeadAttentionState state)
         {
             writer.Write(state.EmbeddingDim);
@@ -238,9 +200,6 @@ namespace Neuraval.Core.Serialization
             WriteOptionalAdamMatrixOptimizerState(writer, state.ValueOptimizerState);
             WriteOptionalAdamMatrixOptimizerState(writer, state.OutputOptimizerState);
 
-            // Campo nuevo desde FormatVersion 2 (Fase 5.5): adaptadores LoRA
-            // de esta capa, opcionales. Va al final para no romper el layout
-            // de los archivos escritos por versiones anteriores.
             writer.Write(state.LoraState != null);
             if (state.LoraState != null)
             {
@@ -264,8 +223,6 @@ namespace Neuraval.Core.Serialization
                 OutputOptimizerState = ReadOptionalAdamMatrixOptimizerState(reader)
             };
 
-            // Los archivos FormatVersion 1 (pre-Fase 5.5) terminan acá: no
-            // tienen el bloque LoRA, así que no hay nada más que leer.
             if (formatVersion >= 2)
             {
                 bool hasLora = reader.ReadBoolean();
@@ -274,10 +231,6 @@ namespace Neuraval.Core.Serialization
 
             return state;
         }
-
-        // ---------------------------------------------------------------
-        // FeedForwardNetworkState
-        // ---------------------------------------------------------------
 
         private static void WriteFeedForwardNetworkState(BinaryWriter writer, FeedForwardNetworkState state)
         {
@@ -310,10 +263,6 @@ namespace Neuraval.Core.Serialization
             };
         }
 
-        // ---------------------------------------------------------------
-        // TransformerBlockState
-        // ---------------------------------------------------------------
-
         private static void WriteTransformerBlockState(BinaryWriter writer, TransformerBlockState state)
         {
             writer.Write(state.EmbeddingDim);
@@ -341,10 +290,6 @@ namespace Neuraval.Core.Serialization
             };
         }
 
-        // ---------------------------------------------------------------
-        // TransformerModelState (punto de entrada)
-        // ---------------------------------------------------------------
-
         public static void WriteTransformerModelState(BinaryWriter writer, TransformerModelState state)
         {
             writer.Write(state.VocabSize);
@@ -368,13 +313,6 @@ namespace Neuraval.Core.Serialization
             WriteOptionalAdamVectorOptimizerState(writer, state.OutputBiasOptimizerState);
         }
 
-        /// <summary>
-        /// Lee el Body de un <c>.navm</c>. <paramref name="formatVersion"/> es la
-        /// versión de layout con la que se escribió el archivo (leída del
-        /// encabezado del archivo por <see cref="ModelBinarySerializer"/>), y
-        /// determina si hay bloques LoRA opcionales que leer dentro de cada
-        /// capa de atención (ver <see cref="ModelBinaryFormat.CurrentFormatVersion"/>).
-        /// </summary>
         public static TransformerModelState ReadTransformerModelState(BinaryReader reader, ushort formatVersion)
         {
             var state = new TransformerModelState

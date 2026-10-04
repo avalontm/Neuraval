@@ -5,19 +5,6 @@ using Neuraval.Tensor;
 
 namespace Neuraval.Core.Models
 {
-    /// <summary>
-    /// Adaptador LoRA para una única proyección lineal congelada W (in x out).
-    ///
-    /// En vez de actualizar W directamente, LoRA agrega una corrección de bajo
-    /// rango: y = x·W + scaling·(x·A)·B, con A (in x rank) y B (rank x out),
-    /// rank &lt;&lt; min(in, out). Solo A y B se entrenan (cada uno con su propio
-    /// Adam); W nunca se toca desde aquí — quien decide si W se congela es
-    /// <see cref="Models.MultiHeadAttention"/> a través de su propio flag.
-    ///
-    /// B se inicializa en cero (A se inicializa aleatoria) para que el
-    /// adaptador arranque siendo la identidad (no altera el modelo base hasta
-    /// que empieza a entrenar), que es la inicialización estándar de LoRA.
-    /// </summary>
     public class LoraProjection
     {
         private readonly int _inDim;
@@ -73,7 +60,6 @@ namespace Neuraval.Core.Models
                 }
             }
 
-            // B arranca en cero: el adaptador no cambia nada hasta que se entrena.
             _matrixB = new float[rank, outDim];
 
             _gradA = new Neuraval.Tensor.Tensor(new[] { inDim, rank });
@@ -88,11 +74,6 @@ namespace Neuraval.Core.Models
             _cacheB = new CudaWeightCache(rank, outDim);
         }
 
-        /// <summary>
-        /// Calcula la corrección de bajo rango ya escalada (scaling·(x·A)·B) y
-        /// cachea las tensores intermedios necesarios para <see cref="Backward"/>.
-        /// El resultado se suma directo al output de la proyección base.
-        /// </summary>
         public Neuraval.Tensor.Tensor Forward(Neuraval.Tensor.Tensor inputTensor, DeviceType device)
         {
             _lastInput = inputTensor;
@@ -104,11 +85,6 @@ namespace Neuraval.Core.Models
             return TensorOps.Scale(delta, _scaling);
         }
 
-        /// <summary>
-        /// Recibe el gradiente respecto al output de la proyección (el mismo que
-        /// recibe la rama base) y devuelve la contribución de LoRA al gradiente
-        /// de entrada. Acumula los gradientes de A y B internamente.
-        /// </summary>
         public Neuraval.Tensor.Tensor Backward(Neuraval.Tensor.Tensor gradOutputTensor, DeviceType device)
         {
             if (_lastInput == null || _lastXa == null)
@@ -216,8 +192,6 @@ namespace Neuraval.Core.Models
             int cols = matrix.GetLength(1);
             var result = new float[rows * cols];
 
-            // float[,] rectangular es contiguo row-major: aplanar es un memcpy
-            // puro, no una copia elemento a elemento.
             System.Buffer.BlockCopy(matrix, 0, result, 0, result.Length * sizeof(float));
 
             return result;
@@ -233,7 +207,6 @@ namespace Neuraval.Core.Models
         }
     }
 
-    /// <summary>Estado serializable de un <see cref="LoraProjection"/> individual.</summary>
     public class LoraProjectionState
     {
         public int InDim { get; set; }
@@ -246,11 +219,6 @@ namespace Neuraval.Core.Models
         public AdamMatrixOptimizerState? OptimizerBState { get; set; }
     }
 
-    /// <summary>
-    /// Estado serializable de los cuatro adaptadores LoRA de una capa de
-    /// atención (Q/K/V/O), más el flag de si los pesos base de esa capa
-    /// quedaron congelados durante el fine-tuning.
-    /// </summary>
     public class LoraAttentionState
     {
         public LoraProjectionState Query { get; set; } = new LoraProjectionState();

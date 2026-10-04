@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Neuraval.Abstractions;
 using Neuraval.Core.Serialization.Gguf;
+using Neuraval.Core.Tokenizers;
 using Xunit;
 
 namespace Neuraval.Tests
@@ -26,8 +27,6 @@ namespace Neuraval.Tests
 
         private static readonly string[] BaseMerges = { "a b", "ab c" };
 
-        // Vocabulario SentencePiece mínimo: "▁" + "h" + "i" con scores que hacen que
-        // ▁h y luego ▁hi se fusionen antes que cualquier otra cosa.
         private static readonly string[] SpTokens =
         {
             "<unk>", "<s>", "</s>", "\u2581", "h", "i", "\u2581h", "\u2581hi"
@@ -170,8 +169,6 @@ namespace Neuraval.Tests
             var file = BuildSentencePieceFile();
             var tokenizer = GgufTokenizerLoader.Load(file);
 
-            // "hi" -> "▁hi" (con el prefijo ▁ agregado por defecto) -> se fusiona por completo
-            // hasta el token "▁hi" (id 7), ya que su score (-0.1) es el más alto disponible.
             var ids = tokenizer.Encode("hi", addSpecialTokens: false);
 
             Assert.Equal(new[] { 7 }, ids);
@@ -192,10 +189,6 @@ namespace Neuraval.Tests
         [Fact]
         public void Load_SentencePieceModel_EncodeChatStartsWithBosToken()
         {
-            // Regresión: un tokenizer SentencePiece (Llama/Mistral) cargado desde
-            // GGUF debe anteponer el BOS al codificar una conversación, igual que
-            // Encode(). Sin esto, el modelo recibe una secuencia que nunca vio en
-            // entrenamiento y la generación degenera en ruido.
             var file = BuildSentencePieceFile();
             var tokenizer = GgufTokenizerLoader.Load(file);
 

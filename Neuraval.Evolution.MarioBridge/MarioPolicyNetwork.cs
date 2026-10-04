@@ -118,16 +118,16 @@ namespace Neuraval.Evolution.MarioBridge
             var biasId = InputCount;
             nodes.Add(new NeatNodeGene(biasId, NeatNodeType.Bias));
 
-            var hiddenStart = biasId + 1;
-            for (var h = 0; h < HiddenSize; h++)
-            {
-                nodes.Add(new NeatNodeGene(hiddenStart + h, NeatNodeType.Hidden));
-            }
-
-            var outputStart = hiddenStart + HiddenSize;
+            var outputStart = biasId + 1;
             for (var o = 0; o < OutputCount; o++)
             {
                 nodes.Add(new NeatNodeGene(outputStart + o, NeatNodeType.Output));
+            }
+
+            var hiddenStart = outputStart + OutputCount;
+            for (var h = 0; h < HiddenSize; h++)
+            {
+                nodes.Add(new NeatNodeGene(hiddenStart + h, NeatNodeType.Hidden));
             }
 
             var connections = new List<NeatConnectionGene>();

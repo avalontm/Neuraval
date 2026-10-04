@@ -8,10 +8,8 @@ namespace Neuraval.Samples.DinoGame.Sources
     {
         public Cactus()
         {
-            Random rnd = new Random();
-
-            x = 1350;
-            type = rnd.Next(6);
+            x = MainGame.SpawnX;
+            type = Random.Shared.Next(6);
 
             if (type < 3)
             {
@@ -49,12 +47,10 @@ namespace Neuraval.Samples.DinoGame.Sources
             Bounds = new Rectangle(x, y, w, h);
         }
 
-
         public override void Update(double speed)
         {
             base.Update(speed);
             x -= (int)speed;
-
         }
 
         public override void Draw(SpriteBatch _spriteBatch)
@@ -79,6 +75,5 @@ namespace Neuraval.Samples.DinoGame.Sources
             DrawManager.DrawLine(_spriteBatch, new Rectangle(Bounds.X + Bounds.Width, Bounds.Y, 1, Bounds.Height), Color.Red);
             DrawManager.DrawLine(_spriteBatch, new Rectangle(Bounds.X, Bounds.Y + Bounds.Height, Bounds.Width, 1), Color.Red);
         }
-
     }
 }

@@ -1,7 +1,5 @@
 namespace Neuraval.Evolution.MarioBridge
 {
-    // Valores del campo Status de sprite ($7E:14C8, tabla de estado de sprites)
-    // relevantes para items sostenibles/tirables. Ver SMW_RAM_Map_IA.md.
     public static class MarioSpriteStatus
     {
         public const int StationaryCarryable = 0x09;

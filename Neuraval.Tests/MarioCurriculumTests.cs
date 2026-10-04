@@ -53,11 +53,6 @@ namespace Neuraval.Tests
         [Fact]
         public void RecordGeneration_SlidesWindow_DiscardingOldestSample()
         {
-            // stageCount=1 aisla el comportamiento de la ventana movil en si:
-            // con un unico tramo (el ultimo), RecordGeneration jamas avanza,
-            // asi que un eventual avance de tramo por el 100f inicial no
-            // puede "enmascarar" lo que este test quiere probar (que las
-            // muestras viejas se descartan de la ventana).
             var curriculum = new MarioCurriculum(stageCount: 1, windowSize: 3, advanceThresholdPercent: 50f);
 
             curriculum.RecordGeneration(100f);

@@ -9,9 +9,6 @@ namespace Neuraval.Tests
         [Fact]
         public void Render_ChatMlStyleTemplate_MatchesQwenFormat()
         {
-            // Reproduce (simplificado) el chat_template real que traen los GGUF de la
-            // familia Qwen/ChatML: "{{ bos_token }}" queda vacío porque estos modelos
-            // no usan BOS, y cada turno se envuelve en <|im_start|>/<|im_end|>.
             const string template =
                 "{% for message in messages %}" +
                 "{{ '<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>\n' }}" +
@@ -36,9 +33,6 @@ namespace Neuraval.Tests
         [Fact]
         public void Render_MistralInstructTemplate_WrapsUserInInstAndMergesSystem()
         {
-            // Aproximación del chat_template real de Mistral-Instruct: el system se
-            // funde en el primer turno de usuario, y bos_token/eos_token vienen del
-            // vocabulario real del GGUF en vez de estar hardcodeados en C#.
             const string template =
                 "{{ bos_token }}" +
                 "{%- set ns = namespace(system_prompt='') -%}" +
@@ -99,9 +93,6 @@ namespace Neuraval.Tests
         [Fact]
         public void Render_WhitespaceControlDefaults_TrimBlocksAndLstripBlocks()
         {
-            // Sin trim_blocks/lstrip_blocks (el comportamiento que usa HuggingFace por
-            // defecto al renderizar chat_template) esto quedaría lleno de saltos de
-            // línea sobrantes entre cada turno.
             const string template =
                 "{% for message in messages %}\n" +
                 "{{ message['content'] }}\n" +
@@ -121,9 +112,6 @@ namespace Neuraval.Tests
         [Fact]
         public void Render_UnsupportedToolFilter_ThrowsJinjaTemplateException()
         {
-            // "tojson"/"selectattr"/etc (tool calling) están deliberadamente fuera de
-            // alcance: deben fallar de forma clara para que el llamador pueda caer al
-            // preset heurístico en vez de producir un render silenciosamente incorrecto.
             const string template = "{{ messages | selectattr('role', 'equalto', 'user') | list }}";
 
             var messages = new List<ChatMessage> { new(ChatRole.User, "hola") };
@@ -135,9 +123,6 @@ namespace Neuraval.Tests
         [Fact]
         public void Render_UnknownMessageAttribute_IsUndefinedNotError()
         {
-            // ChatMessage no tiene "tool_calls"/"name": deben leerse como Undefined
-            // (falsy) para que las ramas de tool-calling de un template real se
-            // salteen solas, en vez de tirar una excepción.
             const string template =
                 "{% for message in messages %}" +
                 "{% if message.tool_calls is defined %}TOOLS{% else %}{{ message['content'] }}{% endif %}" +

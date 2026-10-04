@@ -7,16 +7,6 @@ namespace Neuraval.Cuda
         private CudaBuffer? _buffer;
         private bool _gpuDirty;
 
-        // Cache CPU-side, independiente del buffer de GPU: los backends
-        // CpuParallelBackend/CpuSimdBackend necesitan la matriz de pesos
-        // aplanada (para MatMulTransposeBCachedB) y transpuesta (para
-        // MatMulCachedB) para que el dot product vectorizado tenga acceso
-        // contiguo. Antes de esto, ambos backends recalculaban flatten+transpose
-        // desde cero en cada Forward/Backward, ignorando por completo este
-        // cache (que hasta ahora solo servía al backend CUDA). Comparte la
-        // matriz de origen con el path de GPU, pero nunca toca CudaBuffer ni
-        // asigna memoria de GPU, así que es seguro de usar en ejecuciones sin
-        // CUDA disponible.
         private float[]? _cpuFlatDirect;
         private bool _cpuFlatDirty;
         private float[]? _cpuFlatTransposed;
@@ -57,12 +47,6 @@ namespace Neuraval.Cuda
             return _buffer;
         }
 
-        /// <summary>
-        /// Versión aplanada (row-major, sin transponer) de <paramref name="weights"/>,
-        /// recalculada solo cuando el cache está sucio. Usada por
-        /// MatMulTransposeBCachedB en los backends CPU, donde se necesita
-        /// weights[j, p] directo.
-        /// </summary>
         public float[] GetOrUploadCpuFlat(float[,] weights)
         {
             EnsureShape(weights);
@@ -78,12 +62,6 @@ namespace Neuraval.Cuda
             return _cpuFlatDirect;
         }
 
-        /// <summary>
-        /// Versión aplanada Y transpuesta de <paramref name="weights"/> (shape
-        /// lógico cols x rows), recalculada solo cuando el cache está sucio.
-        /// Usada por MatMulCachedB en los backends CPU, donde conviene tener
-        /// las columnas de weights contiguas para el dot product vectorizado.
-        /// </summary>
         public float[] GetOrUploadCpuTransposed(float[,] weights)
         {
             EnsureShape(weights);

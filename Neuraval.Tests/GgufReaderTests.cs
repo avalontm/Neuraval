@@ -398,8 +398,6 @@ namespace Neuraval.Tests
         [Fact]
         public void Read_UnsupportedTensorType_Throws()
         {
-            // Q4_1 sigue sin implementarse (a diferencia de Q2_K/Q3_K/Q4_K/Q5_K/Q6_K/Q8_K), así
-            // que sigue siendo un buen representante de "tipo no soportado".
             var bytes = new GgufBuilder()
                 .AddTensor("weight", GgmlType.Q4_1, new[] { 32 }, new byte[64])
                 .Build();
@@ -410,9 +408,6 @@ namespace Neuraval.Tests
         [Fact]
         public void Read_Q2_KTensor_DecodesUsingPackedScalesAndMins()
         {
-            // d=2, dmin=1; cada byte de scales=0x21 -> escala(nibble bajo)=1, min(nibble alto)=2
-            // -> dl=d*1=2, ml=dmin*2=2 en los 16 sub-bloques. qs en 0xFF -> cada uno de los 4
-            // campos de 2 bits por byte da 3. Resultado esperado por elemento: dl*3-ml = 6-2 = 4.
             const float d = 2f;
             const float dmin = 1f;
 
@@ -443,11 +438,6 @@ namespace Neuraval.Tests
         [Fact]
         public void Read_Q3_KTensor_DecodesUsingHighBitAndPackedScales()
         {
-            // d=1; hmask en cero (el bit alto siempre está "apagado" -> offset de 4 en todos los
-            // elementos); qs en 0xFF (cada uno de los 4 campos de 2 bits por byte da 3). El bloque
-            // de scales[12] de abajo se desempaqueta (ver DecodeQ3KScales) a 16 bytes, todos 0x21
-            // (33 decimal) -> escala con signo = 33-32 = 1 -> dl = d = 1 en todos los sub-bloques.
-            // Resultado esperado por elemento: dl*(3-4) = -1.
             const float d = 1f;
             var hmask = new byte[32];
             var qs = new byte[64];
@@ -480,13 +470,10 @@ namespace Neuraval.Tests
         [Fact]
         public void Read_Q4_KTensor_DecodesUsingPackedScalesAndMins()
         {
-            // d=2, dmin=5 (no debería usarse: todos los "min" quedan en 0), scale=1 y min=0
-            // para los 8 sub-bloques de 32 vía el empaquetado de 6 bits en `scales[12]`.
             const float d = 2f;
             const float dmin = 5f;
             var scales = new byte[] { 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1 };
 
-            // Cada byte de qs empaqueta nibble bajo=1, nibble alto=2.
             var qs = new byte[128];
             for (int i = 0; i < qs.Length; i++)
                 qs[i] = 0x21;
@@ -503,8 +490,6 @@ namespace Neuraval.Tests
 
             var tensor = ReadFrom(bytes).Find("weight")!;
 
-            // scale=1 => d1=d=2; nibble bajo=1 => 2*1-0=2; nibble alto=2 => 2*2-0=4;
-            // se repite en cada uno de los 4 sub-bloques de 64 elementos.
             var expected = new float[256];
             for (int chunk = 0; chunk < 4; chunk++)
             {
@@ -529,11 +514,11 @@ namespace Neuraval.Tests
 
             var ql = new byte[128];
             for (int i = 0; i < ql.Length; i++)
-                ql[i] = 0x21; // nibble bajo=1, nibble alto=2
+                ql[i] = 0x21;
 
             var qh = new byte[32];
             for (int i = 0; i < qh.Length; i++)
-                qh[i] = 0xFF; // el bit alto siempre está prendido para las 4 combinaciones de máscara
+                qh[i] = 0xFF;
 
             using var rawStream = new MemoryStream();
             rawStream.Write(BitConverter.GetBytes(BitConverter.HalfToUInt16Bits((Half)d)));
@@ -548,7 +533,6 @@ namespace Neuraval.Tests
 
             var tensor = ReadFrom(bytes).Find("weight")!;
 
-            // nibble bajo=1 + bit alto (16) = 17 -> 2*17=34; nibble alto=2+16=18 -> 2*18=36.
             var expected = new float[256];
             for (int chunk = 0; chunk < 4; chunk++)
             {
@@ -573,7 +557,7 @@ namespace Neuraval.Tests
             for (int i = 0; i < 32; i++) { ql[i] = 0x00; ql[32 + i] = 0xFF; }
             for (int i = 0; i < 32; i++) { ql[64 + i] = 0x00; ql[96 + i] = 0xFF; }
 
-            var qh = new byte[64]; // todo en cero: sin aporte de bits altos
+            var qh = new byte[64];
             var scales = new byte[16];
             for (int i = 0; i < scales.Length; i++)
                 scales[i] = 1;
@@ -590,7 +574,6 @@ namespace Neuraval.Tests
 
             var tensor = ReadFrom(bytes).Find("weight")!;
 
-            // ql0=0x00 => q1=q3=(0)-32=-32; ql32=0xFF => q2=q4=(0xF)-32=-17; scale=1, d=1.
             var expected = new float[256];
             for (int chunk = 0; chunk < 2; chunk++)
             {
@@ -624,7 +607,7 @@ namespace Neuraval.Tests
             rawStream.Write(BitConverter.GetBytes(d));
             foreach (var q in qs)
                 rawStream.WriteByte(unchecked((byte)q));
-            rawStream.Write(new byte[32]); // bsums: no se usa para descuantizar
+            rawStream.Write(new byte[32]);
 
             var bytes = new GgufBuilder()
                 .AddTensor("weight", GgmlType.Q8_K, new[] { 256 }, rawStream.ToArray())

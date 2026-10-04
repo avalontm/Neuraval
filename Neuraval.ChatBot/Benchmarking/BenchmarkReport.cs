@@ -4,16 +4,6 @@ using System.Linq;
 
 namespace Neuraval.ChatBot.Benchmarking
 {
-    /// <summary>
-    /// Métricas agregadas de una corrida de benchmark sobre un <see cref="BenchmarkSubject"/>.
-    ///
-    /// Algunas métricas de la Fase 25 del roadmap no son medibles con el contrato actual de
-    /// <see cref="Neuraval.Abstractions.IChatModel"/> y se dejan en null en vez de simularse:
-    /// - TimeToFirstTokenSeconds: requiere respuestas en streaming; SendAsync devuelve el mensaje completo.
-    /// - VramBytes: requiere telemetría de GPU (ej. nvidia-smi / cudaMemGetInfo), no disponible en este proceso.
-    /// - Loss / Perplexity: requieren un dataset de evaluación etiquetado (Fase 26 — Evaluación reproducible)
-    ///   y se pueden completar después con <see cref="WithEvaluationMetrics"/>.
-    /// </summary>
     public sealed class BenchmarkReport
     {
         public string SubjectName { get; }

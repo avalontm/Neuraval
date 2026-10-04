@@ -3,10 +3,6 @@ using Neuraval.Core.Services;
 
 namespace Neuraval.ChatBot.Benchmarking
 {
-    /// <summary>
-    /// Cuenta tokens usando el mismo <see cref="ITokenizer"/> que el modelo nativo,
-    /// dando un conteo exacto en vez del aproximado de <see cref="WhitespaceTokenCounter"/>.
-    /// </summary>
     public sealed class TokenizerTokenCounter : ITokenCounter
     {
         private readonly ITokenizer _tokenizer;

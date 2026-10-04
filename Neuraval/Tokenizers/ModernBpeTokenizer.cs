@@ -13,9 +13,6 @@ namespace Neuraval.Core.Tokenizers
         private List<BpeMergeRule> _merges;
         private Dictionary<(string First, string Second), int> _mergeRank;
 
-        // "tokenizer.ggml.token_type" del GGUF (tipo 3 = CONTROL, p.ej. "<|im_start|>",
-        // "<|endoftext|>", "<|eot_id|>"). Vacío para tokenizers entrenados internamente
-        // (BuildVocabulary/Train), que no tienen este concepto.
         private Dictionary<int, byte> _tokenTypes = new();
 
         public int VocabSize => _vocabulary.Count;
@@ -225,26 +222,7 @@ namespace Neuraval.Core.Tokenizers
         public int[] EncodeChat(IReadOnlyList<ChatMessage> messages, ChatTemplateDefinition? template = null, bool addGenerationPrompt = true)
         {
             var rendered = ChatTemplateEngine.Render(messages, template, addGenerationPrompt);
-
-            if (template?.RawJinjaTemplate != null)
-            {
-                // El chat_template real del GGUF decide por su cuenta dónde va el BOS
-                // (normalmente insertando "{{ bos_token }}"), así que acá no podemos
-                // anteponer StartToken a ciegas como en el camino "legacy" de abajo:
-                // eso duplicaría el BOS en modelos cuyo template ya lo incluye. En vez
-                // de eso, tokenizamos reconociendo los tokens especiales literales
-                // (<s>, <|im_start|>, etc.) y solo agregamos BOS si no quedó ya como
-                // primer token -- el mismo criterio que usa llama.cpp.
-                return EncodeRenderedChatText(rendered);
-            }
-
-            // BUGFIX: antes se devolvía EncodeToIds(rendered) directo, sin token de
-            // inicio (BOS). El modelo fue entrenado para ver siempre BOS como primer
-            // token de la secuencia; sin él, el primer forward pass queda totalmente
-            // fuera de distribución y la generación degenera en ruido.
-            var ids = new List<int> { StartToken };
-            ids.AddRange(EncodeToIds(rendered));
-            return ids.ToArray();
+            return EncodeRenderedChatText(rendered);
         }
 
         private int[] EncodeRenderedChatText(string renderedText)
@@ -320,16 +298,6 @@ namespace Neuraval.Core.Tokenizers
             {
                 var token = _vocabulary.GetToken(id, SpecialTokens.Unk);
 
-                // BUGFIX: antes esto comparaba el texto del token contra los placeholders
-                // internos ("<|bos|>", "<|im_start|>", etc). Para un tokenizer cargado
-                // desde un GGUF real, el texto de esos IDs es el literal propio del
-                // modelo ("<s>", "<|endoftext|>", ...), que nunca coincide con esos
-                // placeholders -- así que en la práctica nunca se saltaba nada y el
-                // texto de los tokens especiales terminaba filtrándose en la salida.
-                // Ahora se decide por ID (Start/End/Pad/Unk/Sep/ImStart/ImEnd, más
-                // cualquier token marcado como CONTROL en tokenizer.ggml.token_type),
-                // que es correcto tanto para vocabularios entrenados internamente como
-                // para los que vienen de un GGUF.
                 if (IsSpecialOrControlToken(id))
                 {
                     FlushByteRun(output, byteRun);

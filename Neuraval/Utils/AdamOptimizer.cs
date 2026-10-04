@@ -60,8 +60,6 @@ namespace Neuraval.Core.Utils
                 TimeStep = _timeStep
             };
 
-            // _m/_v son float[,] rectangulares: su layout en memoria ya es row-major
-            // contiguo e idéntico al de M/V (float[]), así que aplanar es un memcpy.
             Buffer.BlockCopy(_m, 0, state.M, 0, rows * cols * sizeof(float));
             Buffer.BlockCopy(_v, 0, state.V, 0, rows * cols * sizeof(float));
 

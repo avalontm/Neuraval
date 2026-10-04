@@ -37,9 +37,24 @@ namespace Neuraval.Samples.DinoGame.Sources.UI
                 selectedIndex = (selectedIndex - 1 + items.Count) % items.Count;
             }
 
+            MenuItem current = items[selectedIndex];
+
+            if (current.Adjust != null)
+            {
+                if (InputManager.IsKeyPressed(Keys.Right, true) || InputManager.IsKeyPressed(Keys.D, true))
+                {
+                    current.Adjust(1);
+                }
+
+                if (InputManager.IsKeyPressed(Keys.Left, true) || InputManager.IsKeyPressed(Keys.A, true))
+                {
+                    current.Adjust(-1);
+                }
+            }
+
             if (InputManager.IsKeyPressed(Keys.Enter, true) || InputManager.IsKeyPressed(Keys.Space, true))
             {
-                items[selectedIndex].Activate?.Invoke();
+                current.Activate?.Invoke();
             }
         }
 

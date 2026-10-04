@@ -472,9 +472,6 @@ namespace Neuraval.Evolution.MarioBridge
 
                     if (stopRequested && !done)
                     {
-                        // Episodio cortado a mano (Ctrl+C): no lo contamos,
-                        // para no ensuciar el reporte con una corrida
-                        // incompleta.
                         break;
                     }
 

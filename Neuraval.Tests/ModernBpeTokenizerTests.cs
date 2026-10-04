@@ -129,9 +129,6 @@ namespace Neuraval.Tests
         [Fact]
         public void EncodeChat_StartsWithBosToken()
         {
-            // Regresión: EncodeChat no debe olvidarse del token de inicio (BOS).
-            // Sin BOS, el modelo recibe una secuencia que nunca vio en
-            // entrenamiento y la generación degenera en ruido.
             var tokenizer = new ModernBpeTokenizer();
             tokenizer.BuildVocabulary(SampleCorpus());
 

@@ -70,7 +70,7 @@ namespace Neuraval.Evolution.MarioBridge
                 }
             }
 
-            _stream = new FileStream(_tempPath, FileMode.Create, FileAccess.Write);
+            _stream = new FileStream(_tempPath, FileMode.Create, FileAccess.ReadWrite);
             _writer = new BinaryWriter(_stream);
         }
 
@@ -163,7 +163,7 @@ namespace Neuraval.Evolution.MarioBridge
         }
     }
 
-    public sealed record MarioDatasetSample(int Frame, int LevelIndex, float[] Input, SnesButton ActionMask, float Reward, bool Done, int TerminalReason);
+    public sealed record MarioDatasetSample(int Frame, int LevelIndex, float[] Input, SnesButton ActionMask, float Reward, bool Done, int TerminalReason = (int)MarioTerminalReason.None);
 
     public static class MarioDatasetLoader
     {

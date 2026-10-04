@@ -6,39 +6,8 @@ using Neuraval.Core.Quantization;
 
 namespace Neuraval.Core.Serialization
 {
-    /// <summary>
-    /// Convierte un <see cref="TransformerModelState"/> hacia/desde un layout
-    /// binario cuantizado en INT8 (Fase 5.4, post-entrenamiento).
-    ///
-    /// Diferencias respecto a <see cref="ModelStateBinaryConverter"/> (el
-    /// formato de precisión completa):
-    /// <list type="bullet">
-    /// <item>Las matrices de pesos grandes (embeddings, proyecciones Q/K/V/O
-    /// de atención, capas feed-forward) se guardan como INT8 + una escala
-    /// por fila (<see cref="Int8Quantizer"/>), en vez de float32 crudo.</item>
-    /// <item>Los vectores chicos (bias, gamma/beta de layer norm) se dejan en
-    /// float32: su aporte al tamaño total es marginal y cuantizarlos
-    /// arriesga más precisión de la que ahorra.</item>
-    /// <item>No se guarda estado de optimizadores Adam: un modelo cuantizado
-    /// es un artefacto de solo-inferencia, no pensado para reanudar
-    /// entrenamiento. Si hace falta seguir entrenando, se debe partir del
-    /// <c>.navm</c> sin cuantizar.</item>
-    /// </list>
-    ///
-    /// Al cargar, las matrices se decuantizan de vuelta a float32 en memoria:
-    /// el resto del pipeline (Forward, ForwardInference, ForwardIncremental)
-    /// no necesita saber que el archivo en disco estaba cuantizado. Esta es
-    /// la única sub-fase de 5.4 (5.4.1: reducir el tamaño en disco); los
-    /// kernels de matmul que operen directamente sobre INT8 en memoria
-    /// (para acelerar inferencia además de achicar el archivo) quedan para
-    /// una sub-fase siguiente.
-    /// </summary>
     internal static class QuantizedModelStateBinaryConverter
     {
-        // ---------------------------------------------------------------
-        // Helper: matriz grande cuantizada (row-major, rows x cols)
-        // ---------------------------------------------------------------
-
         private static void WriteQuantizedArray(BinaryWriter writer, float[] flatRowMajor, int rows, int cols)
         {
             var quantized = Int8Quantizer.QuantizeRowSymmetric(flatRowMajor, rows, cols);
@@ -76,10 +45,6 @@ namespace Neuraval.Core.Serialization
             return Int8Quantizer.Dequantize(quantized);
         }
 
-        // ---------------------------------------------------------------
-        // EmbeddingLayerState
-        // ---------------------------------------------------------------
-
         private static void WriteEmbeddingLayerStateQuantized(BinaryWriter writer, EmbeddingLayerState state)
         {
             writer.Write(state.VocabSize);
@@ -98,10 +63,6 @@ namespace Neuraval.Core.Serialization
             state.OptimizerState = null;
             return state;
         }
-
-        // ---------------------------------------------------------------
-        // MultiHeadAttentionState
-        // ---------------------------------------------------------------
 
         private static void WriteMultiHeadAttentionStateQuantized(BinaryWriter writer, MultiHeadAttentionState state)
         {
@@ -132,10 +93,6 @@ namespace Neuraval.Core.Serialization
             return state;
         }
 
-        // ---------------------------------------------------------------
-        // FeedForwardNetworkState
-        // ---------------------------------------------------------------
-
         private static void WriteFeedForwardNetworkStateQuantized(BinaryWriter writer, FeedForwardNetworkState state)
         {
             writer.Write(state.EmbeddingDim);
@@ -164,10 +121,6 @@ namespace Neuraval.Core.Serialization
             return state;
         }
 
-        // ---------------------------------------------------------------
-        // TransformerBlockState
-        // ---------------------------------------------------------------
-
         private static void WriteTransformerBlockStateQuantized(BinaryWriter writer, TransformerBlockState state)
         {
             writer.Write(state.EmbeddingDim);
@@ -176,9 +129,6 @@ namespace Neuraval.Core.Serialization
             writer.Write(state.Dropout);
             WriteMultiHeadAttentionStateQuantized(writer, state.AttentionState);
             WriteFeedForwardNetworkStateQuantized(writer, state.FeedforwardState);
-            // Layer norm queda en precisión completa: son solo dos vectores
-            // de tamaño EmbeddingDim por bloque, y son sensibles porque
-            // reescalan la salida de cada sub-capa.
             ModelStateBinaryConverter.WriteLayerNormalizationState(writer, state.Norm1State);
             ModelStateBinaryConverter.WriteLayerNormalizationState(writer, state.Norm2State);
         }
@@ -198,10 +148,6 @@ namespace Neuraval.Core.Serialization
             };
         }
 
-        // ---------------------------------------------------------------
-        // TransformerModelState (punto de entrada)
-        // ---------------------------------------------------------------
-
         public static void WriteTransformerModelStateQuantized(BinaryWriter writer, TransformerModelState state)
         {
             writer.Write(state.VocabSize);
@@ -220,9 +166,6 @@ namespace Neuraval.Core.Serialization
                 WriteTransformerBlockStateQuantized(writer, blockState);
             }
 
-            // FinalNormState y OutputBias quedan en precisión completa:
-            // ninguno de los dos pesa lo suficiente (a lo sumo VocabSize
-            // floats) como para justificar cuantizarlos.
             ModelStateBinaryConverter.WriteLayerNormalizationState(writer, state.FinalNormState);
             ModelStateBinaryConverter.WriteFloatArray(writer, state.OutputBias);
         }

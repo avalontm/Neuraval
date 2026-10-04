@@ -266,8 +266,6 @@ namespace Neuraval.Core.Models
         {
             var flat = new float[batchSize * seqLen];
 
-            // stats[,] es contiguo row-major y su forma [batchSize, seqLen] ya
-            // coincide elemento a elemento con el flat de salida: memcpy puro.
             System.Buffer.BlockCopy(stats, 0, flat, 0, flat.Length * sizeof(float));
 
             return flat;

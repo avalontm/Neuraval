@@ -12,11 +12,6 @@ namespace Neuraval.Evolution.MarioBridge
         public NeatGenome? BestGenomeEver { get; set; }
         public List<NeatGenome> Genomes { get; set; } = new List<NeatGenome>();
 
-        // Nullable a proposito: checkpoints guardados antes de Fase 3 no
-        // tienen estos campos en su header JSON, y System.Text.Json los
-        // deserializa como null sin tirar excepcion. Un null significa
-        // "sin progreso de curriculum guardado todavia" y el llamador
-        // (Program.cs) lo interpreta como arrancar en el tramo 0.
         public int? CurriculumStageIndex { get; set; }
         public int? CurriculumGenerationsAtStage { get; set; }
     }

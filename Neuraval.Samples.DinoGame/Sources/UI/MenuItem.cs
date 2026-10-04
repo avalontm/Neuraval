@@ -6,15 +6,21 @@ namespace Neuraval.Samples.DinoGame.Sources.UI
     {
         public Func<string> Label { get; }
         public Action Activate { get; }
+        public Action<int> Adjust { get; }
 
-        public MenuItem(string label, Action activate) : this(() => label, activate)
+        public MenuItem(string label, Action activate) : this(() => label, activate, null)
         {
         }
 
-        public MenuItem(Func<string> label, Action activate)
+        public MenuItem(Func<string> label, Action activate) : this(label, activate, null)
+        {
+        }
+
+        public MenuItem(Func<string> label, Action activate, Action<int> adjust)
         {
             Label = label;
             Activate = activate;
+            Adjust = adjust;
         }
     }
 }

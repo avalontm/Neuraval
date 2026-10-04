@@ -7,7 +7,6 @@ set OUTPUT_DIR=%SCRIPT_DIR%output
 echo Verificando requisitos...
 echo.
 
-rem --- 1. GPU NVIDIA presente y driver instalado ---
 where nvidia-smi >nul 2>nul
 if errorlevel 1 (
     echo [FALTA] nvidia-smi no encontrado: no se detecta un driver de GPU NVIDIA instalado.
@@ -22,7 +21,6 @@ if errorlevel 1 (
 )
 echo [OK] GPU NVIDIA y driver detectados.
 
-rem --- 2. nvcc (CUDA Toolkit) en el PATH ---
 where nvcc >nul 2>nul
 if errorlevel 1 (
     echo [FALTA] "nvcc" no encontrado en el PATH.
@@ -33,7 +31,6 @@ if errorlevel 1 (
 )
 echo [OK] nvcc encontrado.
 
-rem --- 3. cl.exe (Visual C++ Build Tools) en el PATH: nvcc lo necesita en Windows ---
 where cl >nul 2>nul
 if errorlevel 1 (
     echo [INFO] cl.exe no esta en el PATH todavia. Buscando una instalacion de
@@ -85,11 +82,6 @@ echo.
 
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
 
-rem --- Detectar la capacidad de computo de la GPU para compilar el arch correcto ---
-rem     (evita hardcodear archs viejos que versiones nuevas de nvcc ya no soportan)
-rem     Usamos "--format=csv" sin "noheader" porque la coma dentro de "csv,noheader"
-rem     puede romperse al pasar por el for /f con backticks; en cambio saltamos el
-rem     encabezado con "skip=1" del propio for /f.
 set "COMPUTE_CAP="
 for /f "usebackq skip=1 tokens=* delims=" %%C in (`nvidia-smi --query-gpu=compute_cap --format=csv`) do (
     if not defined COMPUTE_CAP set "COMPUTE_CAP=%%C"

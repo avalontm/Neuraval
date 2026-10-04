@@ -27,17 +27,8 @@ namespace Neuraval.CLI
         public string ModelPath { get; set; } = "SavedModel";
         public string DataFolder { get; set; } = "Data";
 
-        /// <summary>
-        /// Rank de los adaptadores LoRA (Fase 5.5). 0 (default) = LoRA
-        /// deshabilitado, entrenamiento full fine-tuning como siempre. Un
-        /// valor &gt; 0 habilita LoRA en las cuatro proyecciones de atención
-        /// de cada bloque y congela el resto del modelo (embedding, FFN,
-        /// LayerNorms, norma final y bias de salida): solo se entrenan los
-        /// adaptadores A/B.
-        /// </summary>
         public int LoraRank { get; set; } = 0;
 
-        /// <summary>Alpha de LoRA (solo aplica si <see cref="LoraRank"/> &gt; 0).</summary>
         public double LoraAlpha { get; set; } = 16.0;
 
         public static TrainingSettings Load(string filepath, string[] args)
@@ -176,13 +167,6 @@ namespace Neuraval.CLI
             Console.WriteLine();
         }
 
-        /// <summary>
-        /// El path de entrenamiento (training=true) no usa Flash Attention -a propósito, porque
-        /// el backward necesita los pesos de atención completos-, así que cachea una matriz
-        /// batchSize x numHeads x seqLen x seqLen por capa mientras dura el forward+backward del
-        /// batch. Ese es el término dominante de memoria al subir MaxSequenceLength, y crece con
-        /// el cuadrado del contexto. Esto solo estima y avisa, no cambia ningún comportamiento.
-        /// </summary>
         private void PrintAttentionMemoryEstimate()
         {
             const long BytesPerFloat = 4;

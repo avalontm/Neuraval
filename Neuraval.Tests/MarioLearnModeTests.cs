@@ -5,14 +5,6 @@ using Xunit;
 
 namespace Neuraval.Tests
 {
-    // Cubre el pipeline que arma "--learn": MarioDatasetRecorder (grabar al
-    // humano) -> MarioDatasetLoader (releer sin reconectar BizHawk) ->
-    // MarioImitationTrainer (entrenar) -> MarioPolicyNetwork (jugar), que es
-    // exactamente la secuencia que RunLearnMode ejecuta dentro del mismo
-    // proceso sin volver a invocar dotnet run entre pasos. No abre un socket
-    // real hacia BizHawk (eso requeriria el emulador corriendo), pero valida
-    // que grabar y despues entrenar en el mismo proceso produce una politica
-    // cargable y jugable, igual que el flujo manual --capture + --imitate.
     public class MarioLearnModeTests
     {
         private static SnesState BuildState(int frame, int marioX, int controller1)
@@ -34,16 +26,12 @@ namespace Neuraval.Tests
         [Fact]
         public void RecordThenLoadThenTrain_ProducesAPlayablePolicy_WithoutReReadingFromBizHawk()
         {
-            // Simula la fase 1 de --learn: un humano "jugando" corriendo a la
-            // derecha, grabado frame a frame con MarioDatasetRecorder (lo
-            // mismo que hace RunLearnMode con cada estado que llega de
-            // BizHawk).
             var datasetPath = Path.Combine(Path.GetTempPath(), $"mario_learn_dataset_{Guid.NewGuid():N}.navm");
             var policyPath = Path.Combine(Path.GetTempPath(), $"mario_learn_policy_{Guid.NewGuid():N}.navm");
 
             try
             {
-                const int rightButton = 0x01; // bit "Right" en controller1; solo importa que sea consistente.
+                const int rightButton = 0x01;
                 var previousX = 100;
 
                 using (var recorder = new MarioDatasetRecorder(datasetPath))
@@ -62,10 +50,6 @@ namespace Neuraval.Tests
 
                 Assert.True(File.Exists(datasetPath));
 
-                // Fase 2 de --learn: releer el dataset recien grabado (sin
-                // reconectar BizHawk) y entrenar la politica por imitacion,
-                // exactamente como hace RunLearnMode apenas se corta la
-                // grabacion con el primer Ctrl+C.
                 var dataset = MarioDatasetLoader.Load(datasetPath);
                 Assert.NotNull(dataset);
                 Assert.Equal(200, dataset!.Samples.Count);
@@ -76,13 +60,10 @@ namespace Neuraval.Tests
                 var policy = trainer.Train(new Random(1234));
                 policy.Save(policyPath);
 
-                // Fase 3 de --learn: la politica recien entrenada tiene que
-                // poder cargarse y usarse para jugar (--play), sin necesitar
-                // recapturar ni reentrenar nada.
                 var loaded = MarioPolicyNetwork.Load(policyPath);
                 Assert.NotNull(loaded);
 
-                var sampleInput = MarioStateEncoder.Encode(BuildState(0, 150, rightButton));
+                var sampleInput = new MarioEncoderStack().Encode(BuildState(0, 150, rightButton));
                 var output = loaded!.Forward(sampleInput);
                 Assert.Equal(MarioAgent.OutputCount, output.Length);
                 foreach (var probability in output)
@@ -90,9 +71,6 @@ namespace Neuraval.Tests
                     Assert.InRange(probability, 0f, 1f);
                 }
 
-                // No debe tirar: convierte la salida de la red en una accion
-                // valida, igual que hace el loop de --play/--learn en cada
-                // frame.
                 _ = MarioAgentOutput.ToAction(output);
             }
             finally
@@ -105,17 +83,6 @@ namespace Neuraval.Tests
         [Fact]
         public void MarkConnected_SkipsTheExtraStartupReceive_SoResetOnlySendsOneCommand()
         {
-            // RunLearnMode reutiliza la MISMA conexion TCP para la fase de
-            // grabacion y la fase de juego automatico: cuando termina de
-            // grabar, BizHawk ya esta esperando NUESTRA respuesta al ultimo
-            // estado que mandamos leer (no va a mandar un estado "de
-            // arranque" nuevo por su cuenta). Sin MarkConnected(), el primer
-            // Reset() intentaria leer un estado extra antes de mandar RESET
-            // y se quedaria esperando datos que nunca llegan (deadlock). Este
-            // test no abre un socket real, pero fija el contrato de
-            // MarkConnected() via reflection sobre el campo privado
-            // "_connected", que es exactamente lo que Reset() consulta antes
-            // de decidir si hace una lectura extra.
             var connectedField = typeof(SnesEnvironment).GetField(
                 "_connected",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);

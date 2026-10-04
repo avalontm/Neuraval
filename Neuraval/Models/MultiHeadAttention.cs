@@ -393,9 +393,6 @@ namespace Neuraval.Core.Models
                 var keysTensor = MatMulCachedBInference(inputTensor, _keyWeights, _keyWeightsCache, _keyWeightsCacheFp16, _keyWeightsCacheInt8, device);
                 var valuesTensor = MatMulCachedBInference(inputTensor, _valueWeights, _valueWeightsCache, _valueWeightsCacheFp16, _valueWeightsCacheInt8, device);
 
-                // Los adaptadores LoRA siempre se aplican en fp32 (son chicos:
-                // rank x embeddingDim), sin importar el modo de precisión
-                // (fp16/INT8) elegido para los pesos base.
                 if (_queryLora != null) TensorOps.AddInPlace(queriesTensor, _queryLora.Forward(inputTensor, device));
                 if (_keyLora != null) TensorOps.AddInPlace(keysTensor, _keyLora.Forward(inputTensor, device));
                 if (_valueLora != null) TensorOps.AddInPlace(valuesTensor, _valueLora.Forward(inputTensor, device));
@@ -567,9 +564,6 @@ namespace Neuraval.Core.Models
                 var headValuesTensor = TensorOps.SliceColumns(valuesTensor, startIdx, endIdx);
                 var headGradOutputTensor = TensorOps.SliceColumns(gradConcatOutputTensor, startIdx, endIdx);
 
-                // _lastAttentionWeights[head] ya es un bloque contiguo dentro del
-                // float[,,]; copiarlo directo al Buffer del tensor evita el paso
-                // intermedio por un float[,] + conversión elemento a elemento.
                 var attentionWeightsTensor = new Neuraval.Tensor.Tensor(new[] { seqLen, seqLen }, device);
                 System.Buffer.BlockCopy(_lastAttentionWeights, head * seqLen * seqLen * sizeof(float),
                     attentionWeightsTensor.Buffer, 0, seqLen * seqLen * sizeof(float));
@@ -845,8 +839,6 @@ namespace Neuraval.Core.Models
             int cols = matrix.GetLength(1);
             var result = new float[rows * cols];
 
-            // float[,] rectangular es contiguo row-major: aplanar es un memcpy
-            // puro, sin aritmética, no una copia elemento a elemento.
             System.Buffer.BlockCopy(matrix, 0, result, 0, result.Length * sizeof(float));
 
             return result;

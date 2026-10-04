@@ -8,16 +8,6 @@ using Neuraval.Core.Models;
 
 namespace Neuraval.Core.Serialization
 {
-    /// <summary>
-    /// Guarda y carga adaptadores LoRA (Fase 5.5) usando el formato binario
-    /// propietario standalone <c>.navlora</c> descrito en <see cref="LoraBinaryFormat"/>.
-    ///
-    /// A diferencia de <see cref="ModelBinarySerializer"/>, este archivo nunca
-    /// contiene pesos base ni el resto del modelo: solo las matrices A/B (y su
-    /// estado de Adam) de los adaptadores de cada bloque, pensado para
-    /// compartir o versionar un fine-tuning LoRA por separado del checkpoint
-    /// completo del modelo.
-    /// </summary>
     public static class LoraBinarySerializer
     {
         private static readonly JsonSerializerOptions HeaderJsonOptions = new()
@@ -25,10 +15,6 @@ namespace Neuraval.Core.Serialization
             WriteIndented = false
         };
 
-        /// <summary>
-        /// Serializa <paramref name="loraState"/> y lo escribe en
-        /// <paramref name="filePath"/> con el formato <c>.navlora</c>.
-        /// </summary>
         public static void Save(string filePath, TransformerModelLoraState loraState, bool compress = true)
         {
             if (loraState == null) throw new ArgumentNullException(nameof(loraState));
@@ -83,9 +69,6 @@ namespace Neuraval.Core.Serialization
             };
             byte[] headerJson = JsonSerializer.SerializeToUtf8Bytes(header, HeaderJsonOptions);
 
-            // Escribir a un archivo temporal y luego mover, igual criterio que
-            // ModelBinarySerializer.Save: evita dejar un .navlora corrupto/a
-            // medio escribir si el proceso se interrumpe al guardar.
             var tempPath = filePath + ".tmp";
             using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write))
             using (var writer = new BinaryWriter(fileStream, Encoding.UTF8))
@@ -93,7 +76,7 @@ namespace Neuraval.Core.Serialization
                 writer.Write(LoraBinaryFormat.MagicBytes);
                 writer.Write(LoraBinaryFormat.CurrentFormatVersion);
                 writer.Write((byte)flags);
-                writer.Write((byte)0); // reservado
+                writer.Write((byte)0);
                 writer.Write(headerJson.Length);
                 writer.Write(headerJson);
                 writer.Write(bodyOnDisk.Length);
@@ -104,11 +87,6 @@ namespace Neuraval.Core.Serialization
             File.Move(tempPath, filePath, overwrite: true);
         }
 
-        /// <summary>
-        /// Carga un archivo <c>.navlora</c>: valida la firma, la versión de
-        /// formato y el checksum, y devuelve tanto el estado del adaptador
-        /// como el encabezado con sus metadatos.
-        /// </summary>
         public static (TransformerModelLoraState LoraState, LoraBinaryHeader Header) Load(string filePath)
         {
             using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read);
@@ -116,7 +94,7 @@ namespace Neuraval.Core.Serialization
 
             ushort formatVersion = ReadAndValidateFileHeader(reader, filePath);
             var flags = (LoraBinaryFormat.LoraFlags)reader.ReadByte();
-            reader.ReadByte(); // reservado
+            reader.ReadByte();
 
             int headerLength = reader.ReadInt32();
             var headerBytes = reader.ReadBytes(headerLength);
@@ -146,7 +124,6 @@ namespace Neuraval.Core.Serialization
             return (loraState, header);
         }
 
-        /// <summary>Indica si el archivo dado parece ser un adaptador <c>.navlora</c> válido.</summary>
         public static bool IsNavloraFile(string filePath)
         {
             try

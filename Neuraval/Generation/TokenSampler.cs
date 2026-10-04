@@ -22,14 +22,6 @@ namespace Neuraval.Core.Generation
 
             if (options.Greedy)
             {
-                // BUGFIX: antes el modo greedy ignoraba por completo
-                // options.RepetitionPenalty y hacía ArgMax(logits) sobre los logits
-                // crudos. Greedy decoding sin penalización de repetición es la causa
-                // clásica de que la generación caiga en un bucle que repite el mismo
-                // fragmento una y otra vez (justo el síntoma reportado): en cuanto el
-                // modelo entra en un ciclo de 1-2 tokens de alta probabilidad, nada le
-                // impide repetirlo para siempre. Se clona el array para no mutar los
-                // logits originales y se penaliza antes del argmax.
                 var greedyLogits = (float[])logits.Clone();
                 LogitsProcessor.ApplyRepetitionPenalty(greedyLogits, generatedTokenIds, options.RepetitionPenalty);
                 return ArgMax(greedyLogits);

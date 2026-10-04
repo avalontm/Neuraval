@@ -26,9 +26,6 @@ namespace Neuraval.ChatBot.Services
         private readonly double _dropout;
         private int _numThreads;
 
-        /// <summary>
-        /// Initializes a new instance of the TransformerChatBotService.
-        /// </summary>
         public TransformerChatBotService(
             int embeddingDim = 128,
             int numLayers = 4,
@@ -56,9 +53,6 @@ namespace Neuraval.ChatBot.Services
             Console.WriteLine($"  Processor count: {Environment.ProcessorCount}");
         }
 
-        /// <summary>
-        /// Builds vocabulary from training texts and initializes the model.
-        /// </summary>
         public void BuildVocabularyFromTexts(List<string> texts, int minFrequency = 1, int maxVocabSize = 10000)
         {
             if (_tokenizer is Tokenizer wordLevelTokenizer)
@@ -88,9 +82,6 @@ namespace Neuraval.ChatBot.Services
             Console.WriteLine($"  Max Sequence Length: {_maxSequenceLength}");
         }
 
-        /// <summary>
-        /// Trains the model on conversation pairs.
-        /// </summary>
         public void TrainWithConversations(
             List<ConversationPair> conversations,
             int epochs = 100,
@@ -135,7 +126,6 @@ namespace Neuraval.ChatBot.Services
                 };
             }
 
-            // El trainer trabaja en float (Fase 6.1); adaptamos el callback público en double.
             Action<int, float, float>? onEpochCompletedAdapter = onEpochCompleted == null
                 ? null
                 : (epoch, trainLoss, valLoss) => onEpochCompleted(epoch, trainLoss, valLoss);
@@ -157,9 +147,6 @@ namespace Neuraval.ChatBot.Services
             });
         }
 
-        /// <summary>
-        /// Trains the model on raw text sequences.
-        /// </summary>
         public void TrainWithTexts(
             List<string> texts,
             int epochs = 100,
@@ -203,10 +190,6 @@ namespace Neuraval.ChatBot.Services
             Console.WriteLine("Training completed!");
         }
 
-        /// <summary>
-        /// Generates a response using greedy decoding (always picks most likely token).
-        /// This uses the model's Predict() method which returns probabilities.
-        /// </summary>
         public string GenerateResponse(string userMessage, int maxLength = 50)
         {
             if (!_isTrained)
@@ -223,7 +206,6 @@ namespace Neuraval.ChatBot.Services
             {
                 var inputTokens = _tokenizer.EncodePrompt(userMessage);
 
-                // Adaptive max length based on typical response length
                 int adaptiveMaxLength = Math.Min(maxLength, 15);
 
                 var generatedTokens = GenerateGreedy(inputTokens, adaptiveMaxLength);
@@ -269,30 +251,23 @@ namespace Neuraval.ChatBot.Services
             }, cancellationToken);
         }
 
-        /// <summary>
-        /// Generates tokens using greedy decoding strategy.
-        /// Uses TransformerModel.Predict() which returns probabilities via Softmax.
-        /// </summary>
         private List<int> GenerateGreedy(int[] inputTokens, int maxLength)
         {
             var currentSequence = new List<int>(inputTokens);
             var generatedTokens = new List<int>();
 
-            // More aggressive repetition tracking
-            var recentTokens = new Dictionary<int, int>(); // token -> last position
+            var recentTokens = new Dictionary<int, int>();
             int consecutiveRepeats = 0;
             int lastToken = -1;
 
             for (int i = 0; i < maxLength; i++)
             {
-                // Limit sequence length to prevent memory issues
                 var sequenceToUse = currentSequence.Count > _maxSequenceLength
                     ? currentSequence.Skip(currentSequence.Count - _maxSequenceLength).ToArray()
                     : currentSequence.ToArray();
 
                 var probabilities = _model!.Predict(sequenceToUse);
 
-                // Create list of candidates sorted by probability
                 var candidates = probabilities
                     .Select((prob, idx) => new { Prob = prob, Index = idx })
                     .OrderByDescending(x => x.Prob)
@@ -300,39 +275,32 @@ namespace Neuraval.ChatBot.Services
 
                 int nextToken = -1;
 
-                // Try to find a good token
                 foreach (var candidate in candidates)
                 {
                     int token = candidate.Index;
 
-                    // Skip special tokens
                     if (token == _tokenizer.PadToken || token == _tokenizer.UnknownToken)
                         continue;
 
-                    // Stop at end token
                     if (token == _tokenizer.EndToken)
                     {
                         nextToken = token;
                         break;
                     }
 
-                    // Strong penalty for immediate repetition
                     if (token == lastToken && consecutiveRepeats >= 2)
                         continue;
 
-                    // Penalty for tokens used in last 5 positions
                     if (recentTokens.TryGetValue(token, out int lastPos))
                     {
                         if (i - lastPos < 5 && candidate.Prob < 0.3)
                             continue;
                     }
 
-                    // Accept this token
                     nextToken = token;
                     break;
                 }
 
-                // Fallback: use most probable non-special token
                 if (nextToken == -1)
                 {
                     foreach (var candidate in candidates)
@@ -347,21 +315,17 @@ namespace Neuraval.ChatBot.Services
                     }
                 }
 
-                // Ultimate fallback
                 if (nextToken == -1)
                     nextToken = ArgMax(probabilities);
 
-                // Stop if end token
                 if (nextToken == _tokenizer.EndToken)
                     break;
 
-                // Track consecutive repeats
                 if (nextToken == lastToken)
                     consecutiveRepeats++;
                 else
                     consecutiveRepeats = 0;
 
-                // Stop if too many consecutive repeats
                 if (consecutiveRepeats >= 3)
                     break;
 
@@ -374,10 +338,6 @@ namespace Neuraval.ChatBot.Services
             return generatedTokens;
         }
 
-        /// <summary>
-        /// Generates a response with temperature-controlled sampling.
-        /// Temperature > 1.0 makes output more random, < 1.0 makes it more deterministic.
-        /// </summary>
         public string GenerateWithTemperature(
             string userMessage,
             int maxLength = 50,
@@ -397,7 +357,6 @@ namespace Neuraval.ChatBot.Services
             {
                 var inputTokens = _tokenizer.EncodePrompt(userMessage);
 
-                // Adaptive max length
                 int adaptiveMaxLength = Math.Min(maxLength, 15);
 
                 var generatedTokens = GenerateWithTemperatureSampling(inputTokens, adaptiveMaxLength, temperature);
@@ -417,9 +376,6 @@ namespace Neuraval.ChatBot.Services
             }
         }
 
-        /// <summary>
-        /// Generates tokens using temperature-scaled sampling.
-        /// </summary>
         private List<int> GenerateWithTemperatureSampling(
             int[] inputTokens,
             int maxLength,
@@ -429,13 +385,11 @@ namespace Neuraval.ChatBot.Services
             var generatedTokens = new List<int>();
             var random = new Random();
 
-            // Track recent tokens to reduce repetition
             var recentTokens = new List<int>();
             int repetitionWindow = 5;
 
             for (int i = 0; i < maxLength; i++)
             {
-                // Limit sequence length
                 var sequenceToUse = currentSequence.Count > _maxSequenceLength
                     ? currentSequence.Skip(currentSequence.Count - _maxSequenceLength).ToArray()
                     : currentSequence.ToArray();
@@ -449,20 +403,17 @@ namespace Neuraval.ChatBot.Services
                     lastLogits[j] = logits[lastPosition, j];
                 }
 
-                // Apply repetition penalty
                 foreach (var recentToken in recentTokens)
                 {
-                    lastLogits[recentToken] -= 2.0f; // Penalty for recent tokens
+                    lastLogits[recentToken] -= 2.0f;
                 }
 
                 var scaledLogits = ApplyTemperature(lastLogits, temperature);
                 var probabilities = Matematicas.ParallelSoftmax(scaledLogits);
 
-                // Zero out special tokens except END
                 probabilities[_tokenizer.PadToken] = 0.0f;
                 probabilities[_tokenizer.UnknownToken] = 0.0f;
 
-                // Renormalize
                 var sum = probabilities.Sum();
                 if (sum > 0)
                 {
@@ -482,7 +433,6 @@ namespace Neuraval.ChatBot.Services
                 generatedTokens.Add(nextToken);
                 currentSequence.Add(nextToken);
 
-                // Update recent tokens
                 recentTokens.Add(nextToken);
                 if (recentTokens.Count > repetitionWindow)
                 {
@@ -493,9 +443,6 @@ namespace Neuraval.ChatBot.Services
             return generatedTokens;
         }
 
-        /// <summary>
-        /// Generates a response using beam search for higher quality output.
-        /// </summary>
         public string GenerateWithBeamSearch(
             string userMessage,
             int maxLength = 50,
@@ -510,7 +457,6 @@ namespace Neuraval.ChatBot.Services
             {
                 var inputTokens = _tokenizer.EncodePrompt(userMessage);
 
-                // Adaptive max length
                 int adaptiveMaxLength = Math.Min(maxLength, 15);
 
                 var generatedTokens = BeamSearch(inputTokens, adaptiveMaxLength, beamWidth);
@@ -527,9 +473,6 @@ namespace Neuraval.ChatBot.Services
             }
         }
 
-        /// <summary>
-        /// Beam search algorithm for finding optimal token sequences.
-        /// </summary>
         private List<int> BeamSearch(int[] inputTokens, int maxLength, int beamWidth)
         {
             var beams = new List<Beam>
@@ -548,7 +491,6 @@ namespace Neuraval.ChatBot.Services
 
                 foreach (var beam in beams)
                 {
-                    // Check if beam is finished
                     if (beam.Tokens.Count > inputTokens.Length)
                     {
                         var lastToken = beam.Tokens[beam.Tokens.Count - 1];
@@ -559,20 +501,17 @@ namespace Neuraval.ChatBot.Services
                         }
                     }
 
-                    // Limit sequence length
                     var sequenceToUse = beam.Tokens.Count > _maxSequenceLength
                         ? beam.Tokens.Skip(beam.Tokens.Count - _maxSequenceLength).ToArray()
                         : beam.Tokens.ToArray();
 
                     var probabilities = _model!.Predict(sequenceToUse);
 
-                    // Apply repetition penalty
                     foreach (var recentToken in beam.RecentTokens)
                     {
-                        probabilities[recentToken] *= 0.5f; // Reduce probability of recent tokens
+                        probabilities[recentToken] *= 0.5f;
                     }
 
-                    // Filter out special tokens except END
                     probabilities[_tokenizer.PadToken] = 0.0f;
                     probabilities[_tokenizer.UnknownToken] = 0.0f;
 
@@ -580,7 +519,7 @@ namespace Neuraval.ChatBot.Services
 
                     foreach (var (token, prob) in topK)
                     {
-                        if (prob < 1e-10) continue; // Skip very low probability tokens
+                        if (prob < 1e-10) continue;
 
                         var newTokens = new List<int>(beam.Tokens) { token };
                         var newScore = beam.Score + Math.Log(prob + 1e-10);
@@ -588,7 +527,6 @@ namespace Neuraval.ChatBot.Services
                         var newRecentTokens = new HashSet<int>(beam.RecentTokens) { token };
                         if (newRecentTokens.Count > 5)
                         {
-                            // Remove oldest token (this is approximate)
                             newRecentTokens.Remove(newRecentTokens.First());
                         }
 
@@ -606,17 +544,15 @@ namespace Neuraval.ChatBot.Services
                     break;
                 }
 
-                // Select top beams with length normalization
                 beams = candidates
                     .OrderByDescending(b =>
                     {
                         var generatedLength = Math.Max(1, b.Tokens.Count - inputTokens.Length);
-                        return b.Score / Math.Pow(generatedLength, 0.7); // Length penalty
+                        return b.Score / Math.Pow(generatedLength, 0.7);
                     })
                     .Take(beamWidth)
                     .ToList();
 
-                // Check if all beams are finished
                 bool allFinished = beams.All(b =>
                 {
                     if (b.Tokens.Count <= inputTokens.Length) return false;
@@ -639,9 +575,6 @@ namespace Neuraval.ChatBot.Services
             return bestBeam.Tokens.Skip(inputTokens.Length).ToList();
         }
 
-        /// <summary>
-        /// Generates multiple response candidates using different sampling.
-        /// </summary>
         public List<string> GenerateMultipleCandidates(
             string userMessage,
             int numCandidates = 5,
@@ -751,7 +684,6 @@ namespace Neuraval.ChatBot.Services
             return _tokenizer?.VocabSize ?? 0;
         }
 
-        /// <summary>Nombre de archivo del modelo binario propietario dentro de la carpeta del checkpoint.</summary>
         private const string BinaryModelFileName = "model" + ModelBinaryFormat.FileExtension;
 
         public void SaveCompleteModel(string destinationFolder)
@@ -817,9 +749,6 @@ namespace Neuraval.ChatBot.Services
                 _model = TransformerModel.LoadState(modelState);
                 _isTrained = header.IsTrained;
 
-                // Sincroniza los campos de arquitectura con los del checkpoint real,
-                // para que un SaveCompleteModel posterior no escriba metadatos
-                // desactualizados si training-settings.json cambió mientras tanto.
                 _embeddingDim = header.EmbeddingDim;
                 _numLayers = header.NumLayers;
                 _numHeads = header.NumHeads;

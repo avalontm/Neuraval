@@ -31,12 +31,6 @@ namespace Neuraval.Core.Models
         private AdamVectorOptimizer _outputBiasOptimizer = null!;
         private CudaWeightCache _outputProjectionCache = null!;
 
-        /// <summary>
-        /// Cuando hay LoRA habilitado con congelamiento de base (Fase 5.5),
-        /// <see cref="UpdateWeights"/> deja de tocar el embedding, la norma
-        /// final y el bias de salida — solo se entrenan los adaptadores LoRA
-        /// dentro de cada <see cref="TransformerBlock"/>.
-        /// </summary>
         private bool _freezeNonLoraWeights;
 
         public float[,]? PendingHiddenStateGradients => _pendingHiddenStateGradients;
@@ -89,14 +83,6 @@ namespace Neuraval.Core.Models
             _outputProjectionCache = new CudaWeightCache(_vocabSize, _embeddingDim);
         }
 
-        /// <summary>
-        /// Habilita adaptadores LoRA (Fase 5.5) en la capa de atención de
-        /// cada bloque del modelo. Si <paramref name="freezeBase"/> es true
-        /// (default), además congela todo lo demás — embedding, bloques
-        /// completos salvo los adaptadores, norma final y bias de salida —
-        /// de forma que <see cref="UpdateWeights"/> solo entrene A/B de LoRA.
-        /// No hace nada si el modelo ya tenía LoRA habilitado.
-        /// </summary>
         public void EnableLora(int rank, float alpha, bool freezeBase = true, int seed = 9001)
         {
             if (HasLora) return;
@@ -110,12 +96,6 @@ namespace Neuraval.Core.Models
             _freezeNonLoraWeights = freezeBase;
         }
 
-        /// <summary>
-        /// Guarda únicamente los adaptadores LoRA de todos los bloques (y el
-        /// flag de congelamiento), pensado para exportar/importar por
-        /// separado del modelo base con el formato <c>.navlora</c>. Devuelve
-        /// <c>null</c> si el modelo no tiene LoRA habilitado.
-        /// </summary>
         public TransformerModelLoraState? SaveLoraState()
         {
             if (!HasLora) return null;
@@ -137,11 +117,6 @@ namespace Neuraval.Core.Models
             return state;
         }
 
-        /// <summary>
-        /// Carga adaptadores LoRA previamente exportados (por ejemplo desde un
-        /// archivo <c>.navlora</c>) sobre este modelo. Habilita LoRA en cada
-        /// bloque si todavía no estaba habilitado.
-        /// </summary>
         public void LoadLoraState(TransformerModelLoraState state)
         {
             if (state.EmbeddingDim != _embeddingDim || state.NumLayers != _numLayers)
@@ -677,9 +652,6 @@ namespace Neuraval.Core.Models
             int dim = batch.GetLength(2);
             var flat = new float[batchSize * seqLen, dim];
 
-            // batch[b, i, j] y flat[b*seqLen + i, j] son el mismo layout row-major
-            // contiguo en memoria (misma cantidad total de elementos, mismo orden),
-            // así que aplanar es un único memcpy en vez de una copia elemento a elemento.
             Buffer.BlockCopy(batch, 0, flat, 0, batchSize * seqLen * dim * sizeof(float));
 
             return flat;
@@ -861,13 +833,10 @@ namespace Neuraval.Core.Models
 
             if (state.OutputBiasOptimizerState != null) _outputBiasOptimizer.LoadStateInto(state.OutputBiasOptimizerState);
 
-            // Si los bloques trajeron adaptadores LoRA con la base congelada,
-            // el modelo entero se considera en modo "solo LoRA" al recargarlo.
             _freezeNonLoraWeights = _blocks.Count > 0 && _blocks[0].HasLora && _blocks[0].IsBaseFrozen;
 
             _outputProjectionCache.Invalidate();
         }
-
     }
 
     public class TransformerModelState

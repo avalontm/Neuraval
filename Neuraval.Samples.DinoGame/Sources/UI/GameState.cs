@@ -4,6 +4,7 @@ namespace Neuraval.Samples.DinoGame.Sources.UI
     {
         MainMenu,
         Options,
+        ConfirmNewTraining,
         Playing,
         Paused
     }

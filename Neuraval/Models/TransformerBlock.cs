@@ -16,14 +16,6 @@ namespace Neuraval.Core.Models
         private LayerNormalization _norm1;
         private LayerNormalization _norm2;
 
-        /// <summary>
-        /// Cuando hay LoRA habilitado y se pidió congelar la base (Fase 5.5),
-        /// este bloque no solo deja de actualizar los pesos Q/K/V/O de
-        /// atención (eso lo maneja <see cref="MultiHeadAttention"/> con su
-        /// propio flag), sino también el FeedForwardNetwork y las dos
-        /// LayerNormalization del bloque: con LoRA, lo único que se entrena
-        /// dentro de este bloque son los adaptadores A/B de atención.
-        /// </summary>
         private bool _freezeNonLoraWeights;
 
         private float[,]? _lastAttentionDropoutMask;
@@ -51,21 +43,11 @@ namespace Neuraval.Core.Models
             _dropoutRandom = new Random(seed + 987654);
         }
 
-        /// <summary>
-        /// Habilita adaptadores LoRA (Fase 5.5) en la capa de atención de este
-        /// bloque. No hace nada si ya estaban habilitados.
-        /// </summary>
         public void EnableLora(int rank, float alpha, int seed)
         {
             _attention.EnableLora(rank, alpha, seed);
         }
 
-        /// <summary>
-        /// Si <paramref name="freeze"/> es true, <see cref="UpdateWeights"/> deja
-        /// de tocar los pesos base de atención, el FeedForwardNetwork y las
-        /// LayerNormalization de este bloque (solo se siguen entrenando los
-        /// adaptadores LoRA, si están habilitados).
-        /// </summary>
         public void SetFreezeBaseWeights(bool freeze)
         {
             _freezeNonLoraWeights = freeze;
@@ -449,9 +431,6 @@ namespace Neuraval.Core.Models
             block._norm1 = LayerNormalization.LoadState(state.Norm1State);
             block._norm2 = LayerNormalization.LoadState(state.Norm2State);
 
-            // Si la capa de atención cargó adaptadores LoRA, el flag de
-            // congelamiento del resto del bloque (FFN/normas) viaja dentro
-            // de ese mismo estado.
             block._freezeNonLoraWeights = state.AttentionState.LoraState?.FreezeBaseWeights ?? false;
 
             return block;

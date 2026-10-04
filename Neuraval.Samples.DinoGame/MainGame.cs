@@ -16,17 +16,13 @@ namespace Neuraval.Samples.DinoGame
         public static IList<Dino> players;
         public static IList<BaseEnemy> enemies;
         public static GameTime time { private set; get; }
+        public const int SpawnX = 1350;
         float speedStart = 12;
         public static float speed = 12;
         public static bool GameOver = false;
         public static Dino LastPlayer;
         public static bool IsDebug { private set; get; }
 
-        /// <summary>
-        /// Muestra/oculta el panel de "como piensa el Dino" (entradas,
-        /// activaciones ocultas y salida en tiempo real). Activado por
-        /// defecto; se alterna con F2 igual que F1 alterna IsDebug.
-        /// </summary>
         bool showBrainViz = true;
         SpriteBatch _spriteBatch;
         StageBackground background;
@@ -37,12 +33,12 @@ namespace Neuraval.Samples.DinoGame
         Menu mainMenu;
         Menu optionsMenu;
         Menu pauseMenu;
+        Menu confirmNewTrainingMenu;
+        DinoEvolutionSaveData pendingSaveData;
 
-        // Todos los parametros de poblacion/evolucion/dificultad se cargan
-        // desde JSON (se crea con valores por defecto la primera vez que se
-        // ejecuta el juego). Ver DinoTrainingSettings para el detalle y la
-        // ruta del archivo.
         readonly DinoTrainingSettings settings;
+
+        static readonly int[] PopulationSizeOptions = { 100, 250, 500, 1000, 1500, 2000, 3000, 5000 };
 
         readonly Random evolutionRandom = new Random();
         readonly ElitistMutationStrategy<NeuralNetwork> evolutionStrategy;
@@ -52,19 +48,11 @@ namespace Neuraval.Samples.DinoGame
 
         ProbabilidadPorcentaje probabilidad;
         int every_sec = 0;
+        int spawnIntervalFrames;
         int generation = 0;
         int alive = 0;
         Dino playerTarget;
 
-        // Tiempo transcurrido desde que empezo la ronda/generacion actual
-        // (se reinicia en GameStart). Antes la rampa de velocidad usaba
-        // gameTime.TotalGameTime, que es el tiempo total desde que arranco
-        // la aplicacion: eso hacia que la dificultad se acelerase mas y mas
-        // rapido en cada generacion sucesiva de una misma sesion larga, sin
-        // relacion alguna con el desempeño de esa ronda, y volvia el fitness
-        // no comparable entre generaciones (la base misma del algoritmo
-        // genetico). Con este contador propio, cada ronda arranca con la
-        // misma rampa de dificultad que todas las demas.
         double roundElapsedSeconds = 0d;
 
         public MainGame()
@@ -74,7 +62,7 @@ namespace Neuraval.Samples.DinoGame
             _graphics.PreferredBackBufferWidth = 1280;
             _graphics.SynchronizeWithVerticalRetrace = false;
 
-            this.IsFixedTimeStep = true;//false;
+            this.IsFixedTimeStep = true;
             this.TargetElapsedTime = TimeSpan.FromSeconds(1d / 60d);
 
             Content.RootDirectory = "Content";
@@ -82,27 +70,20 @@ namespace Neuraval.Samples.DinoGame
 
             settings = DinoTrainingSettings.Load();
             speedStart = settings.SpeedStart;
+            spawnIntervalFrames = settings.EnemySpawnIntervalFrames;
             DinoStartX = settings.DinoStartX;
             DinoStartXJitter = settings.DinoStartXJitter;
 
             evolutionStrategy = new ElitistMutationStrategy<NeuralNetwork>(
-                evolutionRandom, settings.EliteCount, settings.MutationRate, settings.MutationStrength,
+                evolutionRandom, settings.EliteCount, settings.MutationRate, NeuralNetwork.MutationStrength,
                 settings.RandomInjectionFraction, () => new NeuralNetwork());
         }
 
-        /// <summary>
-        /// Posicion X base y variacion aleatoria (+/-) donde arranca cada
-        /// dinosaurio al reiniciar (<see cref="Dino.Reset"/> las lee de
-        /// aqui, igual que ya leia <see cref="speed"/>). Vienen de
-        /// <see cref="DinoTrainingSettings"/>.
-        /// </summary>
         public static int DinoStartX = 200;
         public static int DinoStartXJitter = 80;
 
         protected override void Initialize()
         {
-            // TODO: Add your initialization logic here
-
             base.Initialize();
         }
 
@@ -110,7 +91,6 @@ namespace Neuraval.Samples.DinoGame
         {
             _spriteBatch = new SpriteBatch(GraphicsDevice);
 
-            // TODO: use this.Content to load your game content here
             font = Content.Load<SpriteFont>("default");
 
             DrawManager.Init(_graphics.GraphicsDevice);
@@ -121,51 +101,18 @@ namespace Neuraval.Samples.DinoGame
             players = new List<Dino>();
             enemies = new List<BaseEnemy>();
 
-            // Intenta continuar la evolucion guardada de una partida
-            // anterior (aunque el juego se haya cerrado por completo). Si no
-            // hay nada guardado, se arranca con una poblacion totalmente
-            // nueva de pesos aleatorios, como antes.
-            var savedData = DinoEvolutionStore.Load();
-
-            if (savedData != null)
-            {
-                generation = savedData.Generation;
-                bestFitnessEver = savedData.BestFitnessEver;
-                bestGenomeEver = savedData.BestGenomeEver;
-
-                var brains = DinoEvolutionStore.RebuildPopulation(
-                    savedData, settings.PopulationSize, evolutionRandom, settings.MutationRate, settings.MutationStrength,
-                    settings.RandomInjectionFraction);
-
-                foreach (var brain in brains)
-                {
-                    players.Add(new Dino(brain));
-                }
-            }
-            else
-            {
-                for (int i = 0; i < settings.PopulationSize; i++)
-                {
-                    players.Add(new Dino());
-                }
-            }
-
-            alive = players.Count;
+            pendingSaveData = DinoEvolutionStore.Load();
 
             BuildMenus();
         }
 
         void BuildMenus()
         {
-            mainMenu = new Menu(new[]
-            {
-                new MenuItem("Nuevo Juego", StartGame),
-                new MenuItem("Opciones", OpenOptions),
-                new MenuItem("Salir", () => Exit())
-            });
+            BuildMainMenu();
 
             optionsMenu = new Menu(new[]
             {
+                new MenuItem(PopulationSizeLabel, () => AdjustPopulation(1), AdjustPopulation),
                 new MenuItem(() => $"Pantalla completa: {(_graphics.IsFullScreen ? "ON" : "OFF")}", ToggleFullscreen),
                 new MenuItem(() => $"HUD de depuracion: {(IsDebug ? "ON" : "OFF")}", ToggleDebugHud),
                 new MenuItem(() => $"Red neuronal: {(showBrainViz ? "ON" : "OFF")}", ToggleBrainViz),
@@ -179,11 +126,108 @@ namespace Neuraval.Samples.DinoGame
                 new MenuItem("Menu Principal", GoToMainMenu),
                 new MenuItem("Salir", () => Exit())
             });
+
+            confirmNewTrainingMenu = new Menu(new[]
+            {
+                new MenuItem("Si, borrar y empezar de cero", ConfirmNewTraining),
+                new MenuItem("Cancelar", CancelNewTraining)
+            });
         }
 
-        void StartGame()
+        void BuildMainMenu()
         {
+            mainMenu = new Menu(BuildMainMenuItems());
+        }
+
+        IEnumerable<MenuItem> BuildMainMenuItems()
+        {
+            if (CanContinueTraining())
+            {
+                yield return new MenuItem("Continuar Entrenamiento", ContinueTraining);
+            }
+
+            yield return new MenuItem("Nuevo Entrenamiento", OpenConfirmNewTraining);
+            yield return new MenuItem("Opciones", OpenOptions);
+            yield return new MenuItem("Salir", () => Exit());
+        }
+
+        bool CanContinueTraining()
+        {
+            return players.Count > 0 || pendingSaveData != null;
+        }
+
+        void ContinueTraining()
+        {
+            if (players.Count == 0 && pendingSaveData != null)
+            {
+                generation = pendingSaveData.Generation;
+                bestFitnessEver = pendingSaveData.BestFitnessEver;
+                bestGenomeEver = pendingSaveData.BestGenomeEver;
+
+                var brains = DinoEvolutionStore.RebuildPopulation(
+                    pendingSaveData, settings.PopulationSize, evolutionRandom, settings.MutationRate, NeuralNetwork.MutationStrength,
+                    settings.RandomInjectionFraction);
+
+                SetupPopulation(brains);
+            }
+
+            PrepareRound();
             state = GameState.Playing;
+        }
+
+        void OpenConfirmNewTraining()
+        {
+            confirmNewTrainingMenu.Reset();
+            state = GameState.ConfirmNewTraining;
+        }
+
+        void CancelNewTraining()
+        {
+            GoToMainMenu();
+        }
+
+        void ConfirmNewTraining()
+        {
+            DinoEvolutionStore.Delete();
+            pendingSaveData = null;
+
+            generation = 0;
+            bestFitnessEver = 0f;
+            bestGenomeEver = null;
+
+            var brains = new List<NeuralNetwork>(settings.PopulationSize);
+
+            for (int i = 0; i < settings.PopulationSize; i++)
+            {
+                brains.Add(new NeuralNetwork());
+            }
+
+            SetupPopulation(brains);
+
+            PrepareRound();
+            state = GameState.Playing;
+        }
+
+        void SetupPopulation(List<NeuralNetwork> brains)
+        {
+            players.Clear();
+
+            foreach (var brain in brains)
+            {
+                players.Add(new Dino(brain));
+            }
+
+            alive = players.Count;
+        }
+
+        void PrepareRound()
+        {
+            enemies.Clear();
+            every_sec = 0;
+            spawnIntervalFrames = settings.EnemySpawnIntervalFrames;
+            speed = speedStart;
+            roundElapsedSeconds = 0d;
+            GameOver = false;
         }
 
         void OpenOptions()
@@ -211,6 +255,7 @@ namespace Neuraval.Samples.DinoGame
 
         void GoToMainMenu()
         {
+            BuildMainMenu();
             mainMenu.Reset();
             state = GameState.MainMenu;
         }
@@ -231,6 +276,34 @@ namespace Neuraval.Samples.DinoGame
             showBrainViz = !showBrainViz;
         }
 
+        string PopulationSizeLabel()
+        {
+            string pending = players.Count > 0 && players.Count != settings.PopulationSize ? "  (se aplica al reiniciar)" : string.Empty;
+            return $"Numero de dinos: {settings.PopulationSize}{pending}";
+        }
+
+        void AdjustPopulation(int direction)
+        {
+            int index = Array.IndexOf(PopulationSizeOptions, settings.PopulationSize);
+
+            if (index < 0)
+            {
+                index = 0;
+
+                for (int i = 1; i < PopulationSizeOptions.Length; i++)
+                {
+                    if (PopulationSizeOptions[i] <= settings.PopulationSize)
+                    {
+                        index = i;
+                    }
+                }
+            }
+
+            index = Math.Clamp(index + direction, 0, PopulationSizeOptions.Length - 1);
+            settings.PopulationSize = PopulationSizeOptions[index];
+            DinoTrainingSettings.Save(settings);
+        }
+
         protected override void Update(GameTime gameTime)
         {
             base.Update(gameTime);
@@ -249,6 +322,14 @@ namespace Neuraval.Samples.DinoGame
                     if (InputManager.IsKeyPressed(Keys.Escape, true))
                     {
                         CloseOptions();
+                    }
+                    break;
+
+                case GameState.ConfirmNewTraining:
+                    confirmNewTrainingMenu.Update();
+                    if (InputManager.IsKeyPressed(Keys.Escape, true))
+                    {
+                        CancelNewTraining();
                     }
                     break;
 
@@ -301,7 +382,6 @@ namespace Neuraval.Samples.DinoGame
 
             if (!GameOver)
             {
-                // TODO: Add your update logic here
                 background.Update(gameTime);
 
                 for (int p = 0; p < players.Count; p++)
@@ -309,21 +389,15 @@ namespace Neuraval.Samples.DinoGame
                     players[p].Update(gameTime);
                 }
 
-                // Se itera hacia atras porque BaseEnemy.Update puede
-                // eliminarse a si mismo de la lista (cuando sale de
-                // pantalla). Iterando hacia adelante, una eliminacion
-                // desplaza los indices siguientes y hace que el elemento
-                // que ocupa el hueco se salte su Update ese frame; iterando
-                // hacia atras, una eliminacion en c nunca afecta a los
-                // indices 0..c-1 que faltan por procesar.
                 for (int c = enemies.Count - 1; c >= 0; c--)
                 {
                     enemies[c].Update(speed);
                 }
 
-                if (every_sec > settings.EnemySpawnIntervalFrames)
+                if (every_sec >= spawnIntervalFrames)
                 {
                     every_sec = 0;
+                    spawnIntervalFrames = NextSpawnIntervalFrames();
                     Spawn_Enemy();
                 }
 
@@ -341,31 +415,17 @@ namespace Neuraval.Samples.DinoGame
 
             generation++;
             every_sec = 0;
+            spawnIntervalFrames = settings.EnemySpawnIntervalFrames;
             speed = speedStart;
             roundElapsedSeconds = 0d;
             GameOver = false;
         }
 
-        /// <summary>
-        /// Reemplaza la poblacion actual por una nueva generacion obtenida
-        /// mediante seleccion + elitismo + mutacion a partir del fitness que
-        /// consiguio cada dinosaurio en la ronda que acaba de terminar. Esto
-        /// es lo que hace que la poblacion realmente "aprenda" de una ronda
-        /// a la siguiente en vez de solo reiniciar posiciones con los mismos
-        /// cerebros aleatorios de siempre.
-        /// </summary>
         void EvolvePopulation()
         {
             var brains = players.Select(p => p.Brain).ToList();
             var fitnessScores = players.Select(p => p.Fitness).ToList();
 
-            // Solo hace falta exportar (copiar todos los pesos de) los
-            // genomas que realmente se van a guardar en disco: el mejor y,
-            // como mucho, MaxEliteGenomesToSave. Antes se llamaba
-            // ExportGenome() para los 1000 dinos de la poblacion en cada
-            // generacion aunque el 94% se descartara enseguida; ordenar
-            // primero por fitness (sin exportar nada) y exportar solo el
-            // top-K es mucho mas barato para poblaciones grandes.
             var rankedPlayers = players.OrderByDescending(p => p.Fitness).ToList();
             int eliteToExport = Math.Min(settings.MaxEliteGenomesToSave, rankedPlayers.Count);
             var ranked = rankedPlayers
@@ -375,17 +435,6 @@ namespace Neuraval.Samples.DinoGame
 
             var nextGenerationBrains = evolutionStrategy.NextGeneration(brains, fitnessScores).ToList();
 
-            // El elitismo de evolutionStrategy solo mira el top de ESTA
-            // ronda: si el mejor genoma de toda la sesion tuvo mala suerte
-            // (obstaculos dificiles) y esta ronda no lo igualo ni lo
-            // supero, puede quedar fuera del top y perderse de la
-            // poblacion en vivo para siempre. Antes solo se garantizaba
-            // que sobreviviera al recargar desde disco (ver
-            // DinoEvolutionStore.RebuildPopulation); esto hace que la
-            // misma garantia aplique tambien dentro de una sesion en vivo,
-            // reinyectandolo sin mutar en el ultimo slot de la siguiente
-            // generacion (parte del cupo de "sangre nueva", el que menos
-            // probablemente ya fuera valioso).
             float bestThisRound = rankedPlayers.Count > 0 ? rankedPlayers[0].Fitness : 0f;
             if (bestGenomeEver != null && bestThisRound < bestFitnessEver && nextGenerationBrains.Count > 0)
             {
@@ -398,9 +447,6 @@ namespace Neuraval.Samples.DinoGame
                 players[i].Reset();
             }
 
-            // Guarda el progreso en disco despues de cada generacion para
-            // que, si se cierra el juego, la proxima vez arranque desde
-            // aqui en lugar de perder todo lo aprendido.
             var saveData = DinoEvolutionStore.BuildSaveData(ranked, generation + 1, bestFitnessEver, bestGenomeEver, settings.MaxEliteGenomesToSave);
             bestFitnessEver = saveData.BestFitnessEver;
             bestGenomeEver = saveData.BestGenomeEver;
@@ -419,7 +465,7 @@ namespace Neuraval.Samples.DinoGame
 
         protected override void Draw(GameTime gameTime)
         {
-            bool menuBackdrop = state == GameState.MainMenu || state == GameState.Options;
+            bool menuBackdrop = state == GameState.MainMenu || state == GameState.Options || state == GameState.ConfirmNewTraining;
             GraphicsDevice.Clear(menuBackdrop ? Color.Black : Color.White);
             _spriteBatch.Begin();
 
@@ -431,6 +477,10 @@ namespace Neuraval.Samples.DinoGame
 
                 case GameState.Options:
                     DrawOptionsScreen();
+                    break;
+
+                case GameState.ConfirmNewTraining:
+                    DrawConfirmNewTrainingScreen();
                     break;
 
                 case GameState.Paused:
@@ -450,7 +500,6 @@ namespace Neuraval.Samples.DinoGame
         void DrawGameplay()
         {
             background.Draw(_spriteBatch);
-            // TODO: Add your drawing code here
 
             for (int p = 0; p < players.Count; p++)
             {
@@ -486,17 +535,118 @@ namespace Neuraval.Samples.DinoGame
             float titleScale = 2.4f;
             float subtitleScale = 1f;
 
-            Vector2 titlePos = new Vector2(CenterX(title, titleScale), screenH * 0.22f);
-            Vector2 subtitlePos = new Vector2(CenterX(subtitle, subtitleScale), titlePos.Y + font.MeasureString(title).Y * titleScale + 12);
+            Vector2 titlePos = new Vector2(CenterX(title, titleScale), screenH * 0.09f);
+            Vector2 subtitlePos = new Vector2(CenterX(subtitle, subtitleScale), titlePos.Y + font.MeasureString(title).Y * titleScale + 8);
 
             _spriteBatch.DrawString(font, title, titlePos, Color.Gold, 0f, Vector2.Zero, titleScale, SpriteEffects.None, 0f);
             _spriteBatch.DrawString(font, subtitle, subtitlePos, Color.White, 0f, Vector2.Zero, subtitleScale, SpriteEffects.None, 0f);
 
-            Vector2 menuOrigin = new Vector2(screenW / 2f - 100, screenH * 0.5f);
-            mainMenu.Draw(_spriteBatch, font, menuOrigin, 40f, 1.1f);
+            Vector2 menuOrigin = new Vector2(screenW / 2f - 150, screenH * 0.32f);
+            mainMenu.Draw(_spriteBatch, font, menuOrigin, 38f, 1.05f);
+
+            DrawTrainingSummaryPanel(screenH * 0.61f);
 
             string hint = "Flechas para moverte  -  Enter para elegir";
-            Vector2 hintPos = new Vector2(CenterX(hint, 0.7f), screenH - 40);
+            Vector2 hintPos = new Vector2(CenterX(hint, 0.7f), screenH - 34);
+            _spriteBatch.DrawString(font, hint, hintPos, new Color(200, 200, 200), 0f, Vector2.Zero, 0.7f, SpriteEffects.None, 0f);
+        }
+
+        string TrainingSummaryHeader()
+        {
+            if (players.Count > 0)
+            {
+                return "ENTRENAMIENTO EN CURSO";
+            }
+
+            return pendingSaveData != null ? "ENTRENAMIENTO GUARDADO" : "SIN ENTRENAMIENTO";
+        }
+
+        string[] TrainingSummaryLines()
+        {
+            if (players.Count > 0)
+            {
+                return new[]
+                {
+                    $"Generacion: {generation}",
+                    $"Vivos: {alive} / {players.Count}",
+                    $"Mejor fitness historico: {bestFitnessEver:0}"
+                };
+            }
+
+            if (pendingSaveData != null)
+            {
+                int elites = pendingSaveData.EliteGenomes == null ? 0 : pendingSaveData.EliteGenomes.Count;
+
+                return new[]
+                {
+                    $"Generacion: {pendingSaveData.Generation}",
+                    $"Mejor fitness historico: {pendingSaveData.BestFitnessEver:0}",
+                    $"Elites guardados: {elites}",
+                    $"Mejor genoma guardado: {(pendingSaveData.BestGenomeEver == null ? "no" : "si")}"
+                };
+            }
+
+            return new[] { "No hay ningun entrenamiento guardado." };
+        }
+
+        void DrawTrainingSummaryPanel(float topY)
+        {
+            int screenW = _graphics.PreferredBackBufferWidth;
+
+            string header = TrainingSummaryHeader();
+            string[] lines = TrainingSummaryLines();
+
+            const float headerScale = 0.95f;
+            const float lineScale = 0.85f;
+            float lineHeight = font.MeasureString("Ag").Y * lineScale + 6f;
+            float headerWidth = font.MeasureString(header).X * headerScale;
+            float headerHeight = font.MeasureString(header).Y * headerScale;
+
+            float contentWidth = headerWidth;
+
+            foreach (string line in lines)
+            {
+                contentWidth = Math.Max(contentWidth, font.MeasureString(line).X * lineScale);
+            }
+
+            int panelWidth = (int)contentWidth + 60;
+            int panelHeight = (int)(headerHeight + lines.Length * lineHeight) + 42;
+
+            var panelRect = new Rectangle((screenW - panelWidth) / 2, (int)topY, panelWidth, panelHeight);
+
+            DrawManager.DrawLine(_spriteBatch, panelRect, new Color(18, 18, 18, 220));
+            DrawManager.DrawRectOutline(_spriteBatch, panelRect, new Color(90, 90, 90));
+
+            Vector2 headerPos = new Vector2(panelRect.X + (panelRect.Width - headerWidth) / 2f, panelRect.Y + 14);
+            _spriteBatch.DrawString(font, header, headerPos, Color.Gold, 0f, Vector2.Zero, headerScale, SpriteEffects.None, 0f);
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                Vector2 linePos = new Vector2(panelRect.X + 30, panelRect.Y + 14 + headerHeight + 12 + i * lineHeight);
+                _spriteBatch.DrawString(font, lines[i], linePos, Color.White, 0f, Vector2.Zero, lineScale, SpriteEffects.None, 0f);
+            }
+        }
+
+        void DrawConfirmNewTrainingScreen()
+        {
+            int screenW = _graphics.PreferredBackBufferWidth;
+            int screenH = _graphics.PreferredBackBufferHeight;
+
+            string title = "NUEVO ENTRENAMIENTO";
+            Vector2 titlePos = new Vector2(CenterX(title, 1.7f), screenH * 0.14f);
+            _spriteBatch.DrawString(font, title, titlePos, Color.Gold, 0f, Vector2.Zero, 1.7f, SpriteEffects.None, 0f);
+
+            string warning = "Se borrara el entrenamiento guardado y no se puede deshacer.";
+            Vector2 warningPos = new Vector2(CenterX(warning, 0.9f), screenH * 0.28f);
+            _spriteBatch.DrawString(font, warning, warningPos, new Color(255, 120, 120), 0f, Vector2.Zero, 0.9f, SpriteEffects.None, 0f);
+
+            DrawTrainingSummaryPanel(screenH * 0.4f);
+
+            Vector2 menuOrigin = new Vector2(screenW / 2f - 230, screenH * 0.7f);
+            confirmNewTrainingMenu.Draw(_spriteBatch, font, menuOrigin, 38f, 1f);
+
+            string hint = "Flechas para moverte  -  Enter para elegir  -  Esc para cancelar";
+            Vector2 hintPos = new Vector2(CenterX(hint, 0.7f), screenH - 34);
             _spriteBatch.DrawString(font, hint, hintPos, new Color(200, 200, 200), 0f, Vector2.Zero, 0.7f, SpriteEffects.None, 0f);
         }
 
@@ -512,7 +662,7 @@ namespace Neuraval.Samples.DinoGame
             Vector2 menuOrigin = new Vector2(screenW / 2f - 180, screenH * 0.42f);
             optionsMenu.Draw(_spriteBatch, font, menuOrigin, 40f, 1f);
 
-            string hint = "Enter para cambiar  -  Esc para volver";
+            string hint = "Enter / flechas para cambiar  -  Esc para volver";
             Vector2 hintPos = new Vector2(CenterX(hint, 0.7f), screenH - 40);
             _spriteBatch.DrawString(font, hint, hintPos, new Color(200, 200, 200), 0f, Vector2.Zero, 0.7f, SpriteEffects.None, 0f);
         }
@@ -534,14 +684,24 @@ namespace Neuraval.Samples.DinoGame
 
         void Spawn_Enemy()
         {
-            if (probabilidad.GenerarConProbabilidad(settings.BirdSpawnProbabilityPercent))
-            {
-                enemies.Add(new Bird());
-            }
-            else
-            {
-                enemies.Add(new Cactus());
-            }
+            BaseEnemy enemy = probabilidad.GenerarConProbabilidad(settings.BirdSpawnProbabilityPercent)
+                ? new Bird()
+                : new Cactus();
+
+            enemy.SetSpawnX(NextSpawnX());
+            enemies.Add(enemy);
+        }
+
+        int NextSpawnIntervalFrames()
+        {
+            int jitter = Math.Max(0, settings.EnemySpawnIntervalJitterFrames);
+            return settings.EnemySpawnIntervalFrames + Random.Shared.Next(0, jitter + 1);
+        }
+
+        int NextSpawnX()
+        {
+            int jitter = Math.Max(0, settings.EnemySpawnXJitter);
+            return SpawnX - Random.Shared.Next(0, jitter + 1);
         }
 
         void DrawGameOverScreen()
@@ -557,8 +717,6 @@ namespace Neuraval.Samples.DinoGame
             Vector2 genSize = font.MeasureString(genText) * 1.2f;
             Vector2 hintSize = font.MeasureString(hint);
 
-            // Fondo semitransparente para que el texto resalte sobre el
-            // fondo blanco/escenario del juego.
             int panelWidth = (int)Math.Max(titleSize.X, Math.Max(genSize.X, hintSize.X)) + 80;
             int panelHeight = 180;
             var panelRect = new Rectangle(
@@ -594,13 +752,6 @@ namespace Neuraval.Samples.DinoGame
             _spriteBatch.DrawString(font, "[F2] Mostrar/ocultar red neuronal  -  [Esc] Pausa", new Vector2(10, 80), Color.Black, 0f, Vector2.Zero, 0.8f, SpriteEffects.None, 0f);
         }
 
-        /// <summary>
-        /// Dibuja el panel de "como piensa el Dino" para el mismo
-        /// dinosaurio que ya se usa para el resto del HUD de depuracion
-        /// (<see cref="playerTarget"/>, fijado en <see cref="DrawDebug"/>).
-        /// Solo se pide el snapshot a un dinosaurio por fotograma (no a los
-        /// hasta miles de la poblacion), asi que el costo extra es mínimo.
-        /// </summary>
         void DrawBrainVisualizer()
         {
             if (!showBrainViz || GameOver || playerTarget == null || playerTarget.dead)

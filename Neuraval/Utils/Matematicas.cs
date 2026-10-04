@@ -285,17 +285,8 @@ namespace Neuraval.Core.Utils
             var result = new float[rowsA, colsB];
             int vecSize = Vector<float>.Count;
 
-            // Nota de rendimiento: se reordenan los bucles de i-j-k a i-k-j.
-            // Con i-j-k, el acceso b[k,j] salta de columna en columna en cada
-            // iteración de k (mala localidad de caché, ~1 cache miss por elemento).
-            // Con i-k-j, para cada k se recorre la fila k de b de forma contigua
-            // y se acumula sobre toda la fila resultado, lo cual además permite
-            // vectorizar con SIMD (Vector<float>, 8 floats a la vez con AVX2).
             fixed (float* pa = a, pb = b, pr = result)
             {
-                // Los lambdas de C# no pueden capturar variables de tipo puntero
-                // directamente (CS1686/CS8909); se pasan como nint (entero) y se
-                // vuelven a castear a puntero dentro del lambda.
                 nint baseA = (nint)pa;
                 nint baseB = (nint)pb;
                 nint baseR = (nint)pr;
@@ -443,7 +434,6 @@ namespace Neuraval.Core.Utils
             });
         }
 
-        // ---------------------------------------------------------------
         public static unsafe float[,] SequentialMatrixMultiply(float[,] a, float[,] b)
         {
             int rowsA = a.GetLength(0);
@@ -556,17 +546,6 @@ namespace Neuraval.Core.Utils
             return partialSums.Sum();
         }
 
-        // ---------------------------------------------------------------
-        // Fase 4.1 - Operaciones por batch (batch como dimensión extra).
-        // Representación: float[,,] con forma [batch, filas, columnas].
-        // Cada operación produce el mismo resultado que aplicar la versión
-        // no batcheada de arriba a cada elemento del batch por separado
-        // (ver Matematicas_BatchOperationsTests para la prueba de equivalencia).
-        // Se paraleliza sobre el índice combinado (batch * fila) en un único
-        // Parallel.For, sin anidar, a propósito: revisar/optimizar el
-        // paralelismo es tarea de la Fase 4.4, no de acá.
-        // ---------------------------------------------------------------
-
         public static void SetBatchSlice(float[,,] batch, int batchIndex, float[,] matrix)
         {
             int rows = matrix.GetLength(0);
@@ -582,9 +561,6 @@ namespace Neuraval.Core.Utils
             int dim = batch.GetLength(2);
             var flat = new float[batchSize * seqLen, dim];
 
-            // batch[b, i, j] y flat[b*seqLen + i, j] comparten el mismo layout
-            // row-major contiguo: aplanar es un único memcpy, no una copia
-            // elemento a elemento (mismo caso que TransformerModel.FlattenBatch).
             Buffer.BlockCopy(batch, 0, flat, 0, batchSize * seqLen * dim * sizeof(float));
 
             return flat;
@@ -599,6 +575,5 @@ namespace Neuraval.Core.Utils
 
             return batch;
         }
-
     }
 }

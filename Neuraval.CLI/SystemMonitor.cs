@@ -6,10 +6,6 @@ using System.Runtime.InteropServices;
 
 namespace Neuraval.CLI
 {
-    /// <summary>
-    /// Monitors system resources (CPU, memory, threads) during model training.
-    /// Cross-platform implementation without external dependencies.
-    /// </summary>
     public class SystemMonitor : IDisposable
     {
         private readonly Timer _timer;
@@ -25,10 +21,6 @@ namespace Neuraval.CLI
         private int _cpuSamples;
         private bool _gpuQueryFailed;
 
-        /// <summary>
-        /// Initializes a new instance of the SystemMonitor class.
-        /// </summary>
-        /// <param name="updateIntervalSeconds">Interval in seconds for periodic stats updates</param>
         public SystemMonitor(int updateIntervalSeconds = 5)
         {
             _process = Process.GetCurrentProcess();
@@ -43,14 +35,9 @@ namespace Neuraval.CLI
 
             PrintSystemInfo();
 
-            // Start timer for periodic monitoring
             _timer = new Timer(UpdateStats, null, updateIntervalSeconds * 1000, updateIntervalSeconds * 1000);
         }
 
-        /// <summary>
-        /// Consulta nvidia-smi para obtener el % de uso de GPU y de memoria de video.
-        /// Devuelve null si no hay GPU, no esta disponible nvidia-smi, o falla la consulta.
-        /// </summary>
         private (int gpuUtilPercent, long memUsedMB, long memTotalMB)? QueryGpuStats()
         {
             if (_gpuQueryFailed)
@@ -80,8 +67,6 @@ namespace Neuraval.CLI
                 string output = proc.StandardOutput.ReadToEnd();
                 proc.WaitForExit(2000);
 
-                // La primera linea es el encabezado del CSV, la segunda tiene los valores
-                // de la primera GPU detectada, por ejemplo: "18 %, 512 MiB, 8192 MiB"
                 var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
                 if (lines.Length < 2)
                 {
@@ -115,9 +100,6 @@ namespace Neuraval.CLI
             return digits.Length > 0 ? int.Parse(digits) : 0;
         }
 
-        /// <summary>
-        /// Prints system configuration information at startup.
-        /// </summary>
         private void PrintSystemInfo()
         {
             Console.WriteLine("===========================================");
@@ -133,7 +115,6 @@ namespace Neuraval.CLI
                 ? "  GPU Support: YES (CUDA activa)"
                 : "  GPU Support: NO (CPU-only mode)");
 
-            // Get available memory information
             try
             {
                 var gcInfo = GC.GetGCMemoryInfo();
@@ -149,16 +130,12 @@ namespace Neuraval.CLI
             Console.WriteLine();
         }
 
-        /// <summary>
-        /// Periodic callback to update and display system statistics.
-        /// </summary>
         private void UpdateStats(object? state)
         {
             try
             {
                 _process.Refresh();
 
-                // Track current memory usage
                 long currentMemoryBytes = _process.WorkingSet64;
                 if (currentMemoryBytes > _peakMemoryBytes)
                 {
@@ -167,7 +144,6 @@ namespace Neuraval.CLI
 
                 double memoryMB = currentMemoryBytes / 1024.0 / 1024.0;
 
-                // Calculate CPU usage for this process
                 var currentTime = DateTime.Now;
                 var currentTotalProcessorTime = _process.TotalProcessorTime;
 
@@ -179,7 +155,6 @@ namespace Neuraval.CLI
                     var processorTimeDiff = (currentTotalProcessorTime - _lastTotalProcessorTime).TotalMilliseconds;
                     cpuUsage = (processorTimeDiff / (timeDiff * Environment.ProcessorCount)) * 100;
 
-                    // Clamp between 0 and 100
                     cpuUsage = Math.Max(0, Math.Min(100, cpuUsage));
 
                     _avgCpuUsage = (_avgCpuUsage * _cpuSamples + cpuUsage) / (_cpuSamples + 1);
@@ -189,13 +164,10 @@ namespace Neuraval.CLI
                 _lastTotalProcessorTime = currentTotalProcessorTime;
                 _lastTime = currentTime;
 
-                // Count active threads
                 int threadCount = _process.Threads.Count;
 
-                // Elapsed time
                 var elapsed = _stopwatch.Elapsed;
 
-                // Consultar uso de GPU si esta activa
                 string gpuInfo = "";
                 if (Neuraval.Core.Utils.Matematicas.GpuEnabled)
                 {
@@ -211,7 +183,6 @@ namespace Neuraval.CLI
                     }
                 }
 
-                // Display compact statistics
                 Console.WriteLine($"[{elapsed:hh\\:mm\\:ss}] CPU: {cpuUsage:F1}% | RAM: {memoryMB:F0} MB | Threads: {threadCount}{gpuInfo}");
             }
             catch (Exception ex)
@@ -220,9 +191,6 @@ namespace Neuraval.CLI
             }
         }
 
-        /// <summary>
-        /// Prints final statistics after training completion.
-        /// </summary>
         public void PrintFinalStats()
         {
             _stopwatch.Stop();
@@ -242,13 +210,11 @@ namespace Neuraval.CLI
 
             Console.WriteLine($"  Final Thread Count: {_process.Threads.Count}");
 
-            // Garbage collection statistics
             Console.WriteLine($"  GC Collections:");
             Console.WriteLine($"    Gen 0: {GC.CollectionCount(0)}");
             Console.WriteLine($"    Gen 1: {GC.CollectionCount(1)}");
             Console.WriteLine($"    Gen 2: {GC.CollectionCount(2)}");
 
-            // Total CPU time used by process
             var totalCpuTime = _process.TotalProcessorTime;
             Console.WriteLine($"  Total CPU Time: {totalCpuTime:hh\\:mm\\:ss}");
 
@@ -256,9 +222,6 @@ namespace Neuraval.CLI
             Console.WriteLine();
         }
 
-        /// <summary>
-        /// Prints current system status on demand.
-        /// </summary>
         public static void PrintCurrentStats()
         {
             var process = Process.GetCurrentProcess();
@@ -277,7 +240,6 @@ namespace Neuraval.CLI
             Console.WriteLine($"  Configured Threads: {Neuraval.Core.Utils.Matematicas.GetNumThreads()}");
             Console.WriteLine($"  Total CPU Time: {process.TotalProcessorTime:hh\\:mm\\:ss}");
 
-            // Managed memory and GC statistics
             var gcMemory = GC.GetTotalMemory(false) / 1024.0 / 1024.0;
             Console.WriteLine($"  Managed Memory: {gcMemory:F0} MB");
             Console.WriteLine($"  GC Gen 0: {GC.CollectionCount(0)}");
@@ -288,9 +250,6 @@ namespace Neuraval.CLI
             Console.WriteLine();
         }
 
-        /// <summary>
-        /// Disposes resources used by the monitor.
-        /// </summary>
         public void Dispose()
         {
             if (_disposed)
