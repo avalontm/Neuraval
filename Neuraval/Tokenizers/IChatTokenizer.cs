@@ -6,6 +6,7 @@ namespace Neuraval.Core.Tokenizers
 {
     public interface IChatTokenizer : ITokenizer
     {
+        bool AddBosToken { get; }
         int ImStartToken { get; }
         int ImEndToken { get; }
 

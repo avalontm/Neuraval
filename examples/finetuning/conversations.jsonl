@@ -1,0 +1,2 @@
+{"messages":[{"role":"user","content":"¿Cuánto es 2 + 2?"},{"role":"assistant","content":"2 + 2 = 4."}]}
+{"messages":[{"role":"system","content":"Responde en español y con frases breves."},{"role":"user","content":"¿De qué color suele ser el pasto?"},{"role":"assistant","content":"El pasto suele ser verde."}]}

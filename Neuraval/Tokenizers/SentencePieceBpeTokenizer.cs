@@ -22,6 +22,7 @@ namespace Neuraval.Core.Tokenizers
         public int UnknownToken { get; private set; }
         public int StartToken { get; private set; }
         public int EndToken { get; private set; }
+        public bool AddBosToken { get; private set; } = true;
         public int SepToken { get; private set; }
         public int ImStartToken { get; private set; }
         public int ImEndToken { get; private set; }
@@ -177,7 +178,7 @@ namespace Neuraval.Core.Tokenizers
                 isFirstPlainSegment = false;
             }
 
-            if (ids.Count == 0 || ids[0] != StartToken)
+            if (AddBosToken && (ids.Count == 0 || ids[0] != StartToken))
                 ids.Insert(0, StartToken);
 
             return ids.ToArray();
@@ -368,6 +369,7 @@ namespace Neuraval.Core.Tokenizers
                 Scores = new Dictionary<int, float>(_scores),
                 TokenTypes = new Dictionary<int, byte>(_tokenTypes),
                 AddDummyPrefix = _addDummyPrefix,
+                AddBosToken = AddBosToken,
                 PadToken = PadToken,
                 UnknownToken = UnknownToken,
                 StartToken = StartToken,
@@ -386,6 +388,7 @@ namespace Neuraval.Core.Tokenizers
                 _scores = new Dictionary<int, float>(state.Scores),
                 _tokenTypes = new Dictionary<int, byte>(state.TokenTypes),
                 _addDummyPrefix = state.AddDummyPrefix,
+                AddBosToken = state.AddBosToken,
                 PadToken = state.PadToken,
                 UnknownToken = state.UnknownToken,
                 StartToken = state.StartToken,
@@ -421,6 +424,7 @@ namespace Neuraval.Core.Tokenizers
         public Dictionary<int, float> Scores { get; set; } = new();
         public Dictionary<int, byte> TokenTypes { get; set; } = new();
         public bool AddDummyPrefix { get; set; } = true;
+        public bool AddBosToken { get; set; } = true;
         public int PadToken { get; set; }
         public int UnknownToken { get; set; }
         public int StartToken { get; set; }

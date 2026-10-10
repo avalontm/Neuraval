@@ -85,6 +85,7 @@ namespace Neuraval.Evolution.MarioBridge
         public int NearestPipeDy { get; }
 
         public IReadOnlyList<byte> Tiles { get; }
+        public IReadOnlyList<ushort> FullTiles { get; }
         public IReadOnlyList<SnesSprite> Sprites { get; }
         public IReadOnlyList<SnesSprite> ClusterSprites { get; }
         public int CoinsNear { get; }
@@ -179,7 +180,8 @@ namespace Neuraval.Evolution.MarioBridge
             bool isVerticalLevel = false,
             int pipeNear = 0,
             int nearestPipeDx = 0,
-            int nearestPipeDy = 0)
+            int nearestPipeDy = 0,
+            IReadOnlyList<ushort>? fullTiles = null)
         {
             Frame = frame;
             MarioX = marioX;
@@ -194,6 +196,7 @@ namespace Neuraval.Evolution.MarioBridge
             PowerupLevel = powerupLevel;
             LevelIndex = levelIndex;
             Tiles = tiles;
+            FullTiles = fullTiles ?? tiles.Select(tile => (ushort)tile).ToArray();
             Sprites = sprites;
             Direction = direction;
             Blocked = blocked;
@@ -283,6 +286,11 @@ namespace Neuraval.Evolution.MarioBridge
                     "un error.");
             }
 
+            var fullTiles = parts[7].Split(',')
+                .Select(token => ushort.Parse(token, CultureInfo.InvariantCulture))
+                .ToArray();
+            var tileBytes = fullTiles.Select(tile => (byte)(tile & 0xFF)).ToArray();
+
             return new SnesState(
                 int.Parse(parts[0], CultureInfo.InvariantCulture),
                 int.Parse(parts[1], CultureInfo.InvariantCulture),
@@ -296,7 +304,7 @@ namespace Neuraval.Evolution.MarioBridge
                 parts[10] == "1",
                 int.Parse(parts[13], CultureInfo.InvariantCulture),
                 int.Parse(parts[14], CultureInfo.InvariantCulture),
-                parts[7].Split(',').Select(token => byte.Parse(token, CultureInfo.InvariantCulture)).ToArray(),
+                tileBytes,
                 ParseSprites(parts[8]),
                 int.Parse(parts[15], CultureInfo.InvariantCulture),
                 int.Parse(parts[16], CultureInfo.InvariantCulture),
@@ -364,7 +372,8 @@ namespace Neuraval.Evolution.MarioBridge
                 parts[68] == "1",
                 ParsePipeSignals(parts[69], 0),
                 ParsePipeSignals(parts[69], 1),
-                ParsePipeSignals(parts[69], 2));
+                ParsePipeSignals(parts[69], 2),
+                fullTiles);
         }
 
         private static int ParsePipeSignals(string raw, int index)

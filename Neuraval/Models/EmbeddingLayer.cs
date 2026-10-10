@@ -6,7 +6,8 @@ namespace Neuraval.Core.Models
 {
     public class EmbeddingLayer
     {
-        private readonly float[,] _embeddings;
+        private float[,] _embeddings;
+        private QuantizedMatrixQ8? _embeddingsQ8;
         private readonly int _vocabSize;
         private readonly int _embeddingDim;
         private readonly Random _random;
@@ -17,19 +18,22 @@ namespace Neuraval.Core.Models
         public int VocabSize => _vocabSize;
         public int EmbeddingDim => _embeddingDim;
         public float[,] EmbeddingsRef => _embeddings;
+        public QuantizedMatrixQ8? QuantizedEmbeddings => _embeddingsQ8;
 
-        public EmbeddingLayer(int vocabSize, int embeddingDim, int seed = 42)
+        public EmbeddingLayer(int vocabSize, int embeddingDim, int seed = 42, bool inferenceOnly = false)
         {
             _vocabSize = vocabSize;
             _embeddingDim = embeddingDim;
             _random = new Random(seed);
 
             _embeddings = new float[vocabSize, embeddingDim];
-            _gradients = new float[vocabSize, embeddingDim];
-            _accumulatedGradients = new float[vocabSize, embeddingDim];
-            _optimizer = new AdamMatrixOptimizer(vocabSize, embeddingDim);
+            _gradients = inferenceOnly ? new float[0, 0] : new float[vocabSize, embeddingDim];
+            _accumulatedGradients = inferenceOnly ? new float[0, 0] : new float[vocabSize, embeddingDim];
+            if (!inferenceOnly)
+                _optimizer = new AdamMatrixOptimizer(vocabSize, embeddingDim);
 
-            InitializeXavier();
+            if (!inferenceOnly)
+                InitializeXavier();
         }
 
         private void InitializeXavier()
@@ -81,6 +85,9 @@ namespace Neuraval.Core.Models
                 throw new ArgumentOutOfRangeException(nameof(tokenIndex),
                     $"Token index must be between 0 and {_vocabSize - 1}");
             }
+
+            if (_embeddingsQ8 != null)
+                return _embeddingsQ8.GetOutputRow(tokenIndex);
 
             var embedding = new float[_embeddingDim];
             for (int i = 0; i < _embeddingDim; i++)
@@ -237,9 +244,18 @@ namespace Neuraval.Core.Models
             return state;
         }
 
-        public static EmbeddingLayer LoadState(EmbeddingLayerState state)
+        public static EmbeddingLayer LoadState(EmbeddingLayerState state, bool inferenceOnly = false)
         {
-            var layer = new EmbeddingLayer(state.VocabSize, state.EmbeddingDim);
+            var layer = new EmbeddingLayer(state.VocabSize, state.EmbeddingDim, inferenceOnly: inferenceOnly);
+
+            if (inferenceOnly)
+            {
+                if (state.Embeddings.Length != checked(state.VocabSize * state.EmbeddingDim))
+                    throw new InvalidDataException("La tabla de embeddings no coincide con sus dimensiones.");
+                layer._embeddingsQ8 = QuantizedMatrixQ8.FromOutputMajor(state.Embeddings, state.VocabSize, state.EmbeddingDim);
+                layer._embeddings = null!;
+                return layer;
+            }
 
             int index = 0;
             for (int i = 0; i < state.VocabSize; i++)
@@ -260,6 +276,18 @@ namespace Neuraval.Core.Models
 
         public float[,] GetAllEmbeddings()
         {
+            if (_embeddingsQ8 != null)
+            {
+                var expanded = new float[_vocabSize, _embeddingDim];
+                for (int row = 0; row < _vocabSize; row++)
+                {
+                    var values = _embeddingsQ8.GetOutputRow(row);
+                    for (int column = 0; column < _embeddingDim; column++)
+                        expanded[row, column] = values[column];
+                }
+                return expanded;
+            }
+
             var result = new float[_vocabSize, _embeddingDim];
             Array.Copy(_embeddings, result, _embeddings.Length);
             return result;
@@ -267,6 +295,8 @@ namespace Neuraval.Core.Models
 
         public void SetEmbedding(int tokenIndex, float[] embedding)
         {
+            if (_embeddingsQ8 != null)
+                throw new InvalidOperationException("No se pueden modificar embeddings en modo de inferencia Q8.");
             if (tokenIndex < 0 || tokenIndex >= _vocabSize)
             {
                 throw new ArgumentOutOfRangeException(nameof(tokenIndex));

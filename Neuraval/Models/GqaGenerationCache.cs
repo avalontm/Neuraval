@@ -53,6 +53,9 @@ namespace Neuraval.Core.Models
             if (batchSize != BatchSize)
                 throw new ArgumentException($"batchSize ({batchSize}) no coincide con el cache ({BatchSize})");
 
+            if (newValues.GetLength(0) != BatchSize || newValues.GetLength(1) != newCount)
+                throw new ArgumentException("Las dimensiones batch y secuencia de keys y values deben coincidir");
+
             if (newKeys.GetLength(2) != NumKeyValueHeads || newValues.GetLength(2) != NumKeyValueHeads)
                 throw new ArgumentException("numKeyValueHeads no coincide con el cache");
 
@@ -62,14 +65,16 @@ namespace Neuraval.Core.Models
             if (_length + newCount > Capacity)
                 throw new InvalidOperationException($"El cache excede su capacidad ({Capacity} posiciones)");
 
+            int bytesPerBatch = checked(newCount * NumKeyValueHeads * HeadDim * sizeof(float));
+            int targetStride = checked(Capacity * NumKeyValueHeads * HeadDim * sizeof(float));
+            int targetOffset = checked(_length * NumKeyValueHeads * HeadDim * sizeof(float));
             for (int b = 0; b < BatchSize; b++)
-                for (int s = 0; s < newCount; s++)
-                    for (int h = 0; h < NumKeyValueHeads; h++)
-                        for (int d = 0; d < HeadDim; d++)
-                        {
-                            _keys[b, _length + s, h, d] = newKeys[b, s, h, d];
-                            _values[b, _length + s, h, d] = newValues[b, s, h, d];
-                        }
+            {
+                int sourceOffset = checked(b * bytesPerBatch);
+                int destinationOffset = checked(b * targetStride + targetOffset);
+                Buffer.BlockCopy(newKeys, sourceOffset, _keys, destinationOffset, bytesPerBatch);
+                Buffer.BlockCopy(newValues, sourceOffset, _values, destinationOffset, bytesPerBatch);
+            }
 
             _length += newCount;
         }
@@ -77,6 +82,10 @@ namespace Neuraval.Core.Models
         public float[,,,] GetKeys() => ExtractRows(_keys);
 
         public float[,,,] GetValues() => ExtractRows(_values);
+
+        internal float KeyAt(int batch, int position, int head, int dimension) => _keys[batch, position, head, dimension];
+
+        internal float ValueAt(int batch, int position, int head, int dimension) => _values[batch, position, head, dimension];
 
         private float[,,,] ExtractRows(float[,,,] source)
         {

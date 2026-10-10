@@ -89,13 +89,18 @@ namespace Neuraval.Tensor.Backends.Cpu
         {
             var weightsTransposed = weightCache.GetOrUploadCpuTransposed(weights);
             var result = new Tensor(new[] { m, n }, a.Device, a.DType);
+            const int outputTile = 16;
+            int tilesPerRow = (n + outputTile - 1) / outputTile;
 
-            Parallel.For(0, m, Options(), i =>
+            Parallel.For(0, m * tilesPerRow, Options(), tileIndex =>
             {
+                int i = tileIndex / tilesPerRow;
+                int firstColumn = (tileIndex % tilesPerRow) * outputTile;
+                int lastColumn = Math.Min(firstColumn + outputTile, n);
                 int aRowOffset = i * k;
                 int resultRowOffset = i * n;
 
-                for (int j = 0; j < n; j++)
+                for (int j = firstColumn; j < lastColumn; j++)
                 {
                     result.Buffer[resultRowOffset + j] = SimdKernels.DotProduct(a.Buffer, aRowOffset, weightsTransposed, j * k, k);
                 }
@@ -108,13 +113,18 @@ namespace Neuraval.Tensor.Backends.Cpu
         {
             var flatWeights = weightCache.GetOrUploadCpuFlat(weights);
             var result = new Tensor(new[] { m, n }, a.Device, a.DType);
+            const int outputTile = 16;
+            int tilesPerRow = (n + outputTile - 1) / outputTile;
 
-            Parallel.For(0, m, Options(), i =>
+            Parallel.For(0, m * tilesPerRow, Options(), tileIndex =>
             {
+                int i = tileIndex / tilesPerRow;
+                int firstColumn = (tileIndex % tilesPerRow) * outputTile;
+                int lastColumn = Math.Min(firstColumn + outputTile, n);
                 int aRowOffset = i * k;
                 int resultRowOffset = i * n;
 
-                for (int j = 0; j < n; j++)
+                for (int j = firstColumn; j < lastColumn; j++)
                 {
                     result.Buffer[resultRowOffset + j] = SimdKernels.DotProduct(a.Buffer, aRowOffset, flatWeights, j * k, k) * scale;
                 }

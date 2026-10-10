@@ -68,18 +68,11 @@ namespace Neuraval.Cuda
 
             if (_cpuFlatTransposed == null || _cpuTransposedDirty)
             {
-                var flat = GetOrUploadCpuFlat(weights);
                 var transposed = new float[_rows * _cols];
 
                 for (int i = 0; i < _rows; i++)
-                {
-                    int rowOffset = i * _cols;
-
                     for (int j = 0; j < _cols; j++)
-                    {
-                        transposed[j * _rows + i] = flat[rowOffset + j];
-                    }
-                }
+                        transposed[j * _rows + i] = weights[i, j];
 
                 _cpuFlatTransposed = transposed;
                 _cpuTransposedDirty = false;

@@ -28,7 +28,7 @@ namespace Neuraval.Core.Serialization.Gguf
                 RmsNormEps = metadata.TryGetFloat($"{architecture}.attention.layer_norm_rms_epsilon", out var eps) ? eps : 1e-6f,
                 Activation = "silu",
                 NormType = "rmsnorm",
-                AttentionBias = false,
+                AttentionBias = file.Find("blk.0.attn_q.bias") != null,
                 TieWordEmbeddings = file.Find("output.weight") == null
             };
 

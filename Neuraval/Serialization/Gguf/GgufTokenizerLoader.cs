@@ -51,6 +51,10 @@ namespace Neuraval.Core.Serialization.Gguf
                 Vocabulary = new VocabularyState { TokenToId = tokenToId },
                 Merges = merges,
                 TokenTypes = tokenTypes,
+                PreTokenizer = file.Metadata.TryGetString("tokenizer.ggml.pre", out var preTokenizer)
+                    ? preTokenizer
+                    : Gpt2TokenizerModel,
+                AddBosToken = ShouldAddBosToken(file),
                 PadToken = padToken,
                 UnknownToken = unkToken,
                 StartToken = bosToken,
@@ -87,6 +91,7 @@ namespace Neuraval.Core.Serialization.Gguf
                 Scores = scores,
                 TokenTypes = tokenTypes,
                 AddDummyPrefix = addDummyPrefix,
+                AddBosToken = ShouldAddBosToken(file),
                 PadToken = padToken,
                 UnknownToken = unkToken,
                 StartToken = bosToken,
@@ -190,6 +195,13 @@ namespace Neuraval.Core.Serialization.Gguf
 
             id = -1;
             return false;
+        }
+
+        private static bool ShouldAddBosToken(GgufFile file)
+        {
+            return !file.Metadata.TryGetValue("tokenizer.ggml.add_bos_token", out var entry)
+                || !entry.TryGetBoolean(out var addBosToken)
+                || addBosToken;
         }
 
         private static int RequireMetadataTokenId(GgufFile file, string key)

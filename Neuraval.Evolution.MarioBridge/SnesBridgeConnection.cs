@@ -167,12 +167,14 @@ namespace Neuraval.Evolution.MarioBridge
                 }
                 catch (System.IO.IOException ex)
                 {
+                    var wasTimeout = ex.InnerException is SocketException socketException
+                        && socketException.SocketErrorCode is SocketError.TimedOut or SocketError.WouldBlock;
+                    var message = wasTimeout
+                        ? $"No llegaron datos de BizHawk en {ReceiveTimeoutMs / 1000} segundos. " +
+                          "Comprueba que el emulador siga ejecutando mario_bridge.lua y no este pausado."
+                        : "BizHawk cerro o interrumpio la conexion mientras MarioBridge esperaba el siguiente estado.";
                     throw new SnesBridgeConnectionLostException(
-                        $"No llego ningun dato de BizHawk en {ReceiveTimeoutMs / 1000} segundos. " +
-                        "Lo mas probable es que el script Lua se haya quedado trabado esperando algo " +
-                        "(un cartel de dialogo que no se cierra, el emulador pausado, o perdio el foco), " +
-                        "o que se haya reiniciado el script/emulador. " +
-                        "El ultimo checkpoint guardado antes de esto sigue intacto.",
+                        message,
                         ex);
                 }
                 catch (ObjectDisposedException ex)

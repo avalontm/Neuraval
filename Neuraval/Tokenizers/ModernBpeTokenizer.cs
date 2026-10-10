@@ -5,13 +5,20 @@ namespace Neuraval.Core.Tokenizers
 {
     public sealed class ModernBpeTokenizer : IChatTokenizer
     {
-        private static readonly System.Text.RegularExpressions.Regex PreTokenPattern = new System.Text.RegularExpressions.Regex(
+        private static readonly System.Text.RegularExpressions.Regex Gpt2PreTokenPattern = new System.Text.RegularExpressions.Regex(
             @"\s?[\p{L}]+|\s?[\p{N}]+|\s?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+        private static readonly System.Text.RegularExpressions.Regex SmolLmPreTokenPattern = new System.Text.RegularExpressions.Regex(
+            @"(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+        private static readonly System.Text.RegularExpressions.Regex Qwen2PreTokenPattern = new System.Text.RegularExpressions.Regex(
+            @"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+",
             System.Text.RegularExpressions.RegexOptions.Compiled);
 
         private Vocabulary _vocabulary;
         private List<BpeMergeRule> _merges;
         private Dictionary<(string First, string Second), int> _mergeRank;
+        private string _preTokenizer = "gpt2";
 
         private Dictionary<int, byte> _tokenTypes = new();
 
@@ -20,6 +27,7 @@ namespace Neuraval.Core.Tokenizers
         public int UnknownToken { get; private set; }
         public int StartToken { get; private set; }
         public int EndToken { get; private set; }
+        public bool AddBosToken { get; private set; } = true;
         public int SepToken { get; private set; }
         public int ImStartToken { get; private set; }
         public int ImEndToken { get; private set; }
@@ -176,14 +184,20 @@ namespace Neuraval.Core.Tokenizers
             return symbols;
         }
 
-        private static List<string> PreTokenize(string text)
+        private List<string> PreTokenize(string text)
         {
             if (string.IsNullOrEmpty(text))
                 return new List<string>();
 
             var chunks = new List<string>();
 
-            foreach (System.Text.RegularExpressions.Match match in PreTokenPattern.Matches(text))
+            var pattern = string.Equals(_preTokenizer, "qwen2", StringComparison.OrdinalIgnoreCase)
+                ? Qwen2PreTokenPattern
+                : string.Equals(_preTokenizer, "smollm", StringComparison.OrdinalIgnoreCase)
+                    ? SmolLmPreTokenPattern
+                    : Gpt2PreTokenPattern;
+
+            foreach (System.Text.RegularExpressions.Match match in pattern.Matches(text))
                 chunks.Add(match.Value);
 
             return chunks;
@@ -238,7 +252,7 @@ namespace Neuraval.Core.Tokenizers
                     ids.AddRange(EncodeToIds(segment.Text));
             }
 
-            if (ids.Count == 0 || ids[0] != StartToken)
+            if (AddBosToken && (ids.Count == 0 || ids[0] != StartToken))
                 ids.Insert(0, StartToken);
 
             return ids.ToArray();
@@ -388,6 +402,8 @@ namespace Neuraval.Core.Tokenizers
                 Vocabulary = _vocabulary.SaveState(),
                 Merges = _merges.Select(m => new BpeMergeRule { First = m.First, Second = m.Second }).ToList(),
                 TokenTypes = new Dictionary<int, byte>(_tokenTypes),
+                PreTokenizer = _preTokenizer,
+                AddBosToken = AddBosToken,
                 PadToken = PadToken,
                 UnknownToken = UnknownToken,
                 StartToken = StartToken,
@@ -405,6 +421,8 @@ namespace Neuraval.Core.Tokenizers
                 _vocabulary = Vocabulary.LoadState(state.Vocabulary),
                 _merges = state.Merges.Select(m => new BpeMergeRule { First = m.First, Second = m.Second }).ToList(),
                 _tokenTypes = new Dictionary<int, byte>(state.TokenTypes),
+                _preTokenizer = string.IsNullOrWhiteSpace(state.PreTokenizer) ? "gpt2" : state.PreTokenizer,
+                AddBosToken = state.AddBosToken,
                 PadToken = state.PadToken,
                 UnknownToken = state.UnknownToken,
                 StartToken = state.StartToken,
@@ -455,6 +473,8 @@ namespace Neuraval.Core.Tokenizers
         public VocabularyState Vocabulary { get; set; } = new();
         public List<BpeMergeRule> Merges { get; set; } = new();
         public Dictionary<int, byte> TokenTypes { get; set; } = new();
+        public string PreTokenizer { get; set; } = "gpt2";
+        public bool AddBosToken { get; set; } = true;
         public int PadToken { get; set; }
         public int UnknownToken { get; set; }
         public int StartToken { get; set; }

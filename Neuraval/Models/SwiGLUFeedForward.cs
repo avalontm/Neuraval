@@ -11,10 +11,11 @@ namespace Neuraval.Core.Models
         private readonly int _embeddingDim;
         private readonly int _hiddenDim;
         private readonly Random _random;
+        private readonly bool _inferenceOnly;
 
-        private float[,] _weightsGate;
-        private float[,] _weightsUp;
-        private float[,] _weightsDown;
+        private float[,] _weightsGate = null!;
+        private float[,] _weightsUp = null!;
+        private float[,] _weightsDown = null!;
 
         private float[,] _gradientsGate;
         private float[,] _gradientsUp;
@@ -31,6 +32,11 @@ namespace Neuraval.Core.Models
         private CudaWeightCache _weightsGateCache = null!;
         private CudaWeightCache _weightsUpCache = null!;
         private CudaWeightCache _weightsDownCache = null!;
+        private CudaWeightCache _weightsGateUpCache = null!;
+        private float[,]? _combinedGateUpWeights;
+        private QuantizedMatrixQ8? _weightsGateQ8;
+        private QuantizedMatrixQ8? _weightsUpQ8;
+        private QuantizedMatrixQ8? _weightsDownQ8;
 
         private float[,]? _lastInput;
         private float[,]? _lastGatePre;
@@ -45,13 +51,40 @@ namespace Neuraval.Core.Models
         public int EmbeddingDim => _embeddingDim;
         public int HiddenDim => _hiddenDim;
 
-        public SwiGLUFeedForward(int embeddingDim, int hiddenDim, int seed = 42)
+        public SwiGLUFeedForward(int embeddingDim, int hiddenDim, int seed = 42, bool inferenceOnly = false)
         {
             _embeddingDim = embeddingDim;
             _hiddenDim = hiddenDim;
             _random = new Random(seed);
+            _inferenceOnly = inferenceOnly;
 
-            InitializeWeights();
+            if (inferenceOnly)
+                InitializeInferenceCaches();
+            else
+                InitializeWeights();
+        }
+
+        private void InitializeInferenceCaches()
+        {
+            _weightsGate = null!;
+            _weightsUp = null!;
+            _weightsDown = null!;
+            _weightsGateQ8 = null;
+            _weightsUpQ8 = null;
+            _weightsDownQ8 = null;
+            _gradientsGate = new float[0, 0];
+            _gradientsUp = new float[0, 0];
+            _gradientsDown = new float[0, 0];
+            _accumulatedGradientsGate = new float[0, 0];
+            _accumulatedGradientsUp = new float[0, 0];
+            _accumulatedGradientsDown = new float[0, 0];
+            _weightsGateOptimizer = null!;
+            _weightsUpOptimizer = null!;
+            _weightsDownOptimizer = null!;
+            _weightsGateCache = new CudaWeightCache(_embeddingDim, _hiddenDim);
+            _weightsUpCache = new CudaWeightCache(_embeddingDim, _hiddenDim);
+            _weightsDownCache = new CudaWeightCache(_hiddenDim, _embeddingDim);
+            _weightsGateUpCache = new CudaWeightCache(_embeddingDim, 2 * _hiddenDim);
         }
 
         private void InitializeWeights()
@@ -78,6 +111,7 @@ namespace Neuraval.Core.Models
             _weightsGateCache = new CudaWeightCache(_embeddingDim, _hiddenDim);
             _weightsUpCache = new CudaWeightCache(_embeddingDim, _hiddenDim);
             _weightsDownCache = new CudaWeightCache(_hiddenDim, _embeddingDim);
+            _weightsGateUpCache = new CudaWeightCache(_embeddingDim, 2 * _hiddenDim);
         }
 
         private float[,] InitializeMatrix(int rows, int cols, float limit)
@@ -163,7 +197,8 @@ namespace Neuraval.Core.Models
                 throw new ArgumentException($"Input dimension {embDim} does not match expected {_embeddingDim}");
             }
 
-            _lastInput = (float[,])input.Clone();
+            if (!_inferenceOnly)
+                _lastInput = (float[,])input.Clone();
 
             var device = TensorDeviceSelector.Current;
             var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() };
@@ -172,8 +207,18 @@ namespace Neuraval.Core.Models
             {
                 var inputTensor = Neuraval.Tensor.Tensor.FromArray2D(input, device);
 
-                var gatePreTensor = TensorOps.MatMulCachedB(inputTensor, _weightsGate, _weightsGateCache);
-                var upTensor = TensorOps.MatMulCachedB(inputTensor, _weightsUp, _weightsUpCache);
+                Neuraval.Tensor.Tensor gatePreTensor;
+                Neuraval.Tensor.Tensor upTensor;
+                if (_inferenceOnly)
+                {
+                    gatePreTensor = _weightsGateQ8!.Multiply(inputTensor);
+                    upTensor = _weightsUpQ8!.Multiply(inputTensor);
+                }
+                else
+                {
+                    var gateUpTensor = TensorOps.MatMulCachedB(inputTensor, GetCombinedGateUpWeights(), _weightsGateUpCache);
+                    (gatePreTensor, upTensor) = SplitGateUp(gateUpTensor, seqLen);
+                }
                 var hiddenTensor = new Neuraval.Tensor.Tensor(new[] { seqLen, _hiddenDim }, device);
 
                 Parallel.For(0, seqLen, parallelOptions, i =>
@@ -186,11 +231,16 @@ namespace Neuraval.Core.Models
                     }
                 });
 
-                _lastGatePre = gatePreTensor.ToArray2D();
-                _lastUp = upTensor.ToArray2D();
-                _lastHidden = hiddenTensor.ToArray2D();
+                if (!_inferenceOnly)
+                {
+                    _lastGatePre = gatePreTensor.ToArray2D();
+                    _lastUp = upTensor.ToArray2D();
+                    _lastHidden = hiddenTensor.ToArray2D();
+                }
 
-                var outputTensor = TensorOps.MatMulCachedB(hiddenTensor, _weightsDown, _weightsDownCache);
+                var outputTensor = _inferenceOnly
+                    ? _weightsDownQ8!.Multiply(hiddenTensor)
+                    : TensorOps.MatMulCachedB(hiddenTensor, _weightsDown, _weightsDownCache);
 
                 return outputTensor.ToArray2D();
             }
@@ -272,7 +322,8 @@ namespace Neuraval.Core.Models
                 throw new ArgumentException($"Input dimension {embDim} does not match expected {_embeddingDim}");
             }
 
-            _lastInputBatch = (float[,,])inputBatch.Clone();
+            if (!_inferenceOnly)
+                _lastInputBatch = (float[,,])inputBatch.Clone();
 
             var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() };
             var device = TensorDeviceSelector.Current;
@@ -282,11 +333,21 @@ namespace Neuraval.Core.Models
             {
                 var inputTensor = Neuraval.Tensor.Tensor.FromArray2D(flatInput, device);
 
-                var gatePreFlat = TensorOps.MatMulCachedB(inputTensor, _weightsGate, _weightsGateCache);
-                var upFlat = TensorOps.MatMulCachedB(inputTensor, _weightsUp, _weightsUpCache);
+                Neuraval.Tensor.Tensor gatePreFlat;
+                Neuraval.Tensor.Tensor upFlat;
+                if (_inferenceOnly)
+                {
+                    gatePreFlat = _weightsGateQ8!.Multiply(inputTensor);
+                    upFlat = _weightsUpQ8!.Multiply(inputTensor);
+                }
+                else
+                {
+                    var gateUpFlat = TensorOps.MatMulCachedB(inputTensor, GetCombinedGateUpWeights(), _weightsGateUpCache);
+                    (gatePreFlat, upFlat) = SplitGateUp(gateUpFlat, batchSize * seqLen);
+                }
                 var hiddenFlat = new Neuraval.Tensor.Tensor(new[] { batchSize * seqLen, _hiddenDim }, device);
 
-                Parallel.For(0, batchSize * seqLen, parallelOptions, flatIndex =>
+                Action<int> applyActivation = flatIndex =>
                 {
                     int rowOffset = flatIndex * _hiddenDim;
 
@@ -294,13 +355,29 @@ namespace Neuraval.Core.Models
                     {
                         hiddenFlat.Buffer[rowOffset + j] = SiLU(gatePreFlat.Buffer[rowOffset + j]) * upFlat.Buffer[rowOffset + j];
                     }
-                });
+                };
 
-                _lastGatePreBatch = UnflattenBatch(gatePreFlat.ToArray2D(), batchSize, seqLen, _hiddenDim);
-                _lastUpBatch = UnflattenBatch(upFlat.ToArray2D(), batchSize, seqLen, _hiddenDim);
-                _lastHiddenBatch = UnflattenBatch(hiddenFlat.ToArray2D(), batchSize, seqLen, _hiddenDim);
+                int rowCount = batchSize * seqLen;
+                if (rowCount <= 2)
+                {
+                    for (int row = 0; row < rowCount; row++)
+                        applyActivation(row);
+                }
+                else
+                {
+                    Parallel.For(0, rowCount, parallelOptions, applyActivation);
+                }
 
-                var outputFlat = TensorOps.MatMulCachedB(hiddenFlat, _weightsDown, _weightsDownCache);
+                if (!_inferenceOnly)
+                {
+                    _lastGatePreBatch = UnflattenBatch(gatePreFlat.ToArray2D(), batchSize, seqLen, _hiddenDim);
+                    _lastUpBatch = UnflattenBatch(upFlat.ToArray2D(), batchSize, seqLen, _hiddenDim);
+                    _lastHiddenBatch = UnflattenBatch(hiddenFlat.ToArray2D(), batchSize, seqLen, _hiddenDim);
+                }
+
+                var outputFlat = _inferenceOnly
+                    ? _weightsDownQ8!.Multiply(hiddenFlat)
+                    : TensorOps.MatMulCachedB(hiddenFlat, _weightsDown, _weightsDownCache);
 
                 return UnflattenBatch(outputFlat.ToArray2D(), batchSize, seqLen, _embeddingDim);
             }
@@ -351,6 +428,38 @@ namespace Neuraval.Core.Models
             return batch;
         }
 
+        private float[,] GetCombinedGateUpWeights()
+        {
+            if (_combinedGateUpWeights != null)
+                return _combinedGateUpWeights;
+
+            var combined = new float[_embeddingDim, 2 * _hiddenDim];
+            for (int input = 0; input < _embeddingDim; input++)
+                for (int output = 0; output < _hiddenDim; output++)
+                {
+                    combined[input, output] = _weightsGate[input, output];
+                    combined[input, _hiddenDim + output] = _weightsUp[input, output];
+                }
+
+            _combinedGateUpWeights = combined;
+            return combined;
+        }
+
+        private (Neuraval.Tensor.Tensor Gate, Neuraval.Tensor.Tensor Up) SplitGateUp(Neuraval.Tensor.Tensor combined, int rows)
+        {
+            var gate = new Neuraval.Tensor.Tensor(new[] { rows, _hiddenDim }, combined.Device, combined.DType);
+            var up = new Neuraval.Tensor.Tensor(new[] { rows, _hiddenDim }, combined.Device, combined.DType);
+            int rowBytes = _hiddenDim * sizeof(float);
+            int combinedRowBytes = 2 * rowBytes;
+            for (int row = 0; row < rows; row++)
+            {
+                Buffer.BlockCopy(combined.Buffer, row * combinedRowBytes, gate.Buffer, row * rowBytes, rowBytes);
+                Buffer.BlockCopy(combined.Buffer, row * combinedRowBytes + rowBytes, up.Buffer, row * rowBytes, rowBytes);
+            }
+
+            return (gate, up);
+        }
+
         public void UpdateWeights(float learningRate)
         {
             _weightsGateOptimizer.Update(_weightsGate, _gradientsGate, learningRate);
@@ -360,6 +469,8 @@ namespace Neuraval.Core.Models
             _weightsGateCache.Invalidate();
             _weightsUpCache.Invalidate();
             _weightsDownCache.Invalidate();
+            _combinedGateUpWeights = null;
+            _weightsGateUpCache.Invalidate();
 
             Matematicas.ParallelClearMatrix(_gradientsGate);
             Matematicas.ParallelClearMatrix(_gradientsUp);
@@ -402,21 +513,35 @@ namespace Neuraval.Core.Models
             return result;
         }
 
-        public static SwiGLUFeedForward LoadState(SwiGLUFeedForwardState state)
+        public static SwiGLUFeedForward LoadState(SwiGLUFeedForwardState state, bool inferenceOnly = false)
         {
-            var network = new SwiGLUFeedForward(state.EmbeddingDim, state.HiddenDim);
+            var network = new SwiGLUFeedForward(state.EmbeddingDim, state.HiddenDim, inferenceOnly: inferenceOnly);
 
-            network._weightsGate = UnflattenMatrix(state.WeightsGate, state.EmbeddingDim, state.HiddenDim);
-            network._weightsUp = UnflattenMatrix(state.WeightsUp, state.EmbeddingDim, state.HiddenDim);
-            network._weightsDown = UnflattenMatrix(state.WeightsDown, state.HiddenDim, state.EmbeddingDim);
+            if (inferenceOnly)
+            {
+                network._weightsGateQ8 = QuantizedMatrixQ8.FromInputOutputMajor(state.WeightsGate, state.EmbeddingDim, state.HiddenDim);
+                network._weightsUpQ8 = QuantizedMatrixQ8.FromInputOutputMajor(state.WeightsUp, state.EmbeddingDim, state.HiddenDim);
+                network._weightsDownQ8 = QuantizedMatrixQ8.FromInputOutputMajor(state.WeightsDown, state.HiddenDim, state.EmbeddingDim);
+                network._weightsGate = null!;
+                network._weightsUp = null!;
+                network._weightsDown = null!;
+            }
+            else
+            {
+                network._weightsGate = UnflattenMatrix(state.WeightsGate, state.EmbeddingDim, state.HiddenDim);
+                network._weightsUp = UnflattenMatrix(state.WeightsUp, state.EmbeddingDim, state.HiddenDim);
+                network._weightsDown = UnflattenMatrix(state.WeightsDown, state.HiddenDim, state.EmbeddingDim);
+            }
 
-            if (state.WeightsGateOptimizerState != null) network._weightsGateOptimizer.LoadStateInto(state.WeightsGateOptimizerState);
-            if (state.WeightsUpOptimizerState != null) network._weightsUpOptimizer.LoadStateInto(state.WeightsUpOptimizerState);
-            if (state.WeightsDownOptimizerState != null) network._weightsDownOptimizer.LoadStateInto(state.WeightsDownOptimizerState);
+            if (!inferenceOnly && state.WeightsGateOptimizerState != null) network._weightsGateOptimizer.LoadStateInto(state.WeightsGateOptimizerState);
+            if (!inferenceOnly && state.WeightsUpOptimizerState != null) network._weightsUpOptimizer.LoadStateInto(state.WeightsUpOptimizerState);
+            if (!inferenceOnly && state.WeightsDownOptimizerState != null) network._weightsDownOptimizer.LoadStateInto(state.WeightsDownOptimizerState);
 
             network._weightsGateCache.Invalidate();
             network._weightsUpCache.Invalidate();
             network._weightsDownCache.Invalidate();
+            network._combinedGateUpWeights = null;
+            network._weightsGateUpCache.Invalidate();
 
             return network;
         }

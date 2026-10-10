@@ -279,11 +279,12 @@ namespace Neuraval.Evolution.MarioBridge
             var tc = TileCategoryBlockStart;
             for (var i = 0; i < GridCellCount; i++)
             {
-                var tile = state.Tiles[i];
+                var tileFull = i < state.FullTiles.Count ? state.FullTiles[i] : state.Tiles[i];
+                var tile = tileFull & 0xFF;
                 var offset = tc + i * TileCategorySignalCount;
                 var isCoin = tile == CoinTileLowByte;
                 var isCoinBlock = tile == CoinBlockTileLowByteA || tile == CoinBlockTileLowByteB;
-                var isSolid = tile != 0 && !isCoin && !isCoinBlock;
+                var isSolid = tileFull != 0 && !isCoin && !isCoinBlock;
                 input[offset + 0] = isSolid ? 1f : 0f;
                 input[offset + 1] = isCoin ? 1f : 0f;
                 input[offset + 2] = isCoinBlock ? 1f : 0f;

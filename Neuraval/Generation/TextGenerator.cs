@@ -50,7 +50,12 @@ namespace Neuraval.Core.Generation
             return GenerationResult.Create(generatedTokenIds, finishReason);
         }
 
-        public CachedGenerationOutput GenerateWithCache(int[] promptTokenIds, GenerationOptions options, Random? random = null)
+        public CachedGenerationOutput GenerateWithCache(
+            int[] promptTokenIds,
+            GenerationOptions options,
+            Random? random = null,
+            Action<int>? onTokenGenerated = null,
+            int? contextLimit = null)
         {
             if (promptTokenIds == null || promptTokenIds.Length == 0)
                 throw new ArgumentException("promptTokenIds no puede ser nulo ni vacío", nameof(promptTokenIds));
@@ -58,12 +63,14 @@ namespace Neuraval.Core.Generation
             if (options == null)
                 throw new ArgumentNullException(nameof(options));
 
-            int maxLength = _model.MaxPositionEmbeddings;
-            var promptContext = TrimToContextWindow(new List<int>(promptTokenIds));
+            int maxLength = Math.Min(_model.MaxPositionEmbeddings, contextLimit ?? _model.MaxPositionEmbeddings);
+            if (maxLength < 2)
+                throw new ArgumentOutOfRangeException(nameof(contextLimit), "El contexto debe permitir al menos un token de entrada y uno de salida.");
 
-            int capacity = Math.Min(maxLength, promptContext.Length + options.MaxNewTokens);
-            if (capacity < promptContext.Length)
-                capacity = promptContext.Length;
+            int generationCapacity = Math.Min(options.MaxNewTokens, maxLength - 1);
+            int promptCapacity = maxLength - generationCapacity;
+            var promptContext = TrimToContextWindow(new List<int>(promptTokenIds), promptCapacity);
+            int capacity = promptContext.Length + generationCapacity;
 
             var cache = _model.CreateGenerationCache(capacity);
             var rng = random ?? (options.Seed.HasValue ? new Random(options.Seed.Value) : new Random());
@@ -72,10 +79,9 @@ namespace Neuraval.Core.Generation
             var finishReason = GenerationFinishReason.MaxNewTokens;
 
             var prefillStopwatch = Stopwatch.StartNew();
-            var logits = _model.ForwardIncremental(promptContext, cache);
+            var lastLogits = _model.ForwardIncrementalLastToken(promptContext, cache);
             prefillStopwatch.Stop();
 
-            var lastLogits = ExtractLastPositionLogits(logits);
             var decodeStopwatch = new Stopwatch();
 
             for (int step = 0; step < options.MaxNewTokens; step++)
@@ -94,16 +100,16 @@ namespace Neuraval.Core.Generation
                     break;
                 }
 
+                onTokenGenerated?.Invoke(nextToken);
+
                 if (cache.Length >= cache.Capacity)
                 {
                     decodeStopwatch.Stop();
                     break;
                 }
 
-                var stepLogits = _model.ForwardIncremental(new[] { nextToken }, cache);
+                lastLogits = _model.ForwardIncrementalLastToken(new[] { nextToken }, cache);
                 decodeStopwatch.Stop();
-
-                lastLogits = ExtractLastPositionLogits(stepLogits);
             }
 
             var result = GenerationResult.Create(generatedTokenIds, finishReason);
@@ -119,7 +125,11 @@ namespace Neuraval.Core.Generation
 
         private int[] TrimToContextWindow(List<int> sequence)
         {
-            int maxLength = _model.MaxPositionEmbeddings;
+            return TrimToContextWindow(sequence, _model.MaxPositionEmbeddings);
+        }
+
+        private static int[] TrimToContextWindow(List<int> sequence, int maxLength)
+        {
 
             if (sequence.Count <= maxLength)
                 return sequence.ToArray();

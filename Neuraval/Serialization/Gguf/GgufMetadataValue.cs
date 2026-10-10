@@ -31,6 +31,18 @@ namespace Neuraval.Core.Serialization.Gguf
             }
         }
 
+        public bool TryGetBoolean(out bool value)
+        {
+            if (Raw is bool boolean)
+            {
+                value = boolean;
+                return true;
+            }
+
+            value = false;
+            return false;
+        }
+
         public bool TryGetDouble(out double value)
         {
             switch (Raw)

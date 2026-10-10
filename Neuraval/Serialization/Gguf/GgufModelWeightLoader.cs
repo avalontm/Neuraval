@@ -9,17 +9,17 @@ namespace Neuraval.Core.Serialization.Gguf
 {
     public static class GgufModelWeightLoader
     {
-        public static ModernDecoderModel Load(string filePath)
+        public static ModernDecoderModel Load(string filePath, bool inferenceOnly = false)
         {
-            return Load(GgufModelLoader.Load(filePath));
+            return Load(GgufModelLoader.Load(filePath), inferenceOnly);
         }
 
-        public static ModernDecoderModel Load(GgufFile file)
+        public static ModernDecoderModel Load(GgufFile file, bool inferenceOnly = false)
         {
-            return Load(GgufModelLoader.Load(file));
+            return Load(GgufModelLoader.Load(file), inferenceOnly);
         }
 
-        public static ModernDecoderModel Load(GgufLoadResult result)
+        public static ModernDecoderModel Load(GgufLoadResult result, bool inferenceOnly = false)
         {
             if (result == null)
                 throw new ArgumentNullException(nameof(result));
@@ -29,7 +29,7 @@ namespace Neuraval.Core.Serialization.Gguf
                     $"El GGUF no contiene todos los tensores requeridos por la configuración resuelta. Faltan: {string.Join(", ", result.Report.MissingNames)}");
 
             var state = BuildState(result.Config, result.Weights);
-            return ModernDecoderModel.LoadState(state);
+            return ModernDecoderModel.LoadState(state, inferenceOnly);
         }
 
         public static ModernDecoderModelState BuildState(TransformerConfig config, IReadOnlyList<SafeTensorsEntry> weights)
@@ -103,6 +103,9 @@ namespace Neuraval.Core.Serialization.Gguf
             var wk = RequireTensor(byName, TensorNameMapper.SelfAttnKProjName(layerIndex));
             var wv = RequireTensor(byName, TensorNameMapper.SelfAttnVProjName(layerIndex));
             var wo = RequireTensor(byName, TensorNameMapper.SelfAttnOProjName(layerIndex));
+            var bq = OptionalVector(byName, TensorNameMapper.SelfAttnQProjBiasName(layerIndex), hidden);
+            var bk = OptionalVector(byName, TensorNameMapper.SelfAttnKProjBiasName(layerIndex), kvDim);
+            var bv = OptionalVector(byName, TensorNameMapper.SelfAttnVProjBiasName(layerIndex), kvDim);
 
             var gate = RequireTensor(byName, TensorNameMapper.MlpGateProjName(layerIndex));
             var up = RequireTensor(byName, TensorNameMapper.MlpUpProjName(layerIndex));
@@ -124,7 +127,10 @@ namespace Neuraval.Core.Serialization.Gguf
                 Wq = ToInOutMatrix2D(wq.Data, hidden, hidden),
                 Wk = ToInOutMatrix2D(wk.Data, kvDim, hidden),
                 Wv = ToInOutMatrix2D(wv.Data, kvDim, hidden),
-                Wo = ToInOutMatrix2D(wo.Data, hidden, hidden)
+                Wo = ToInOutMatrix2D(wo.Data, hidden, hidden),
+                Bq = bq,
+                Bk = bk,
+                Bv = bv
             };
 
             var feedforwardState = new SwiGLUFeedForwardState
@@ -175,6 +181,15 @@ namespace Neuraval.Core.Serialization.Gguf
                 throw new InvalidOperationException($"Falta el tensor requerido '{name}' para construir el ModernDecoderModel");
 
             return entry;
+        }
+
+        private static float[] OptionalVector(Dictionary<string, SafeTensorsEntry> byName, string name, int expectedLength)
+        {
+            if (!byName.TryGetValue(name, out var entry))
+                return Array.Empty<float>();
+
+            ValidateShape1D(entry, expectedLength);
+            return (float[])entry.Data.Clone();
         }
 
         private static void ValidateShape(SafeTensorsEntry entry, int expectedOutDim, int expectedInDim)

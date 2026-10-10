@@ -15,10 +15,12 @@ namespace Neuraval.Core.Models
         private RMSNorm _finalNorm;
 
         private float[,]? _outputWeights;
+        private QuantizedMatrixQ8? _outputWeightsQ8;
         private float[,]? _outputWeightsGradients;
         private float[,]? _accumulatedOutputWeightsGradients;
         private AdamMatrixOptimizer? _outputWeightsOptimizer;
         private CudaWeightCache _outputProjectionCache = null!;
+        private readonly bool _inferenceOnly;
 
         private float[,]? _pendingHiddenStateGradients;
 
@@ -29,12 +31,27 @@ namespace Neuraval.Core.Models
         public int MaxPositionEmbeddings => _config.MaxPositionEmbeddings;
 
         public ModernDecoderModel(TransformerConfig config, int seed = 42)
+            : this(config, seed, inferenceOnly: false)
+        {
+        }
+
+        private ModernDecoderModel(TransformerConfig config, int seed, bool inferenceOnly)
         {
             if (config == null)
                 throw new ArgumentNullException(nameof(config));
 
             config.Validate();
             _config = config.Clone();
+            _inferenceOnly = inferenceOnly;
+
+            if (inferenceOnly)
+            {
+                _embedding = null!;
+                _blocks = new List<ModernDecoderBlock>();
+                _finalNorm = null!;
+                _outputProjectionCache = new CudaWeightCache(_config.VocabSize, _config.HiddenSize);
+                return;
+            }
 
             _embedding = new EmbeddingLayer(_config.VocabSize, _config.HiddenSize, seed);
 
@@ -73,6 +90,7 @@ namespace Neuraval.Core.Models
 
         public void ZeroGradients()
         {
+            EnsureTrainingEnabled();
             _embedding.ZeroGradients();
 
             foreach (var block in _blocks)
@@ -86,6 +104,7 @@ namespace Neuraval.Core.Models
 
         public void AverageGradients(int batchSize)
         {
+            EnsureTrainingEnabled();
             _embedding.AverageGradients(batchSize);
 
             foreach (var block in _blocks)
@@ -126,6 +145,34 @@ namespace Neuraval.Core.Models
 
         public float[,] ForwardIncremental(int[] newTokens, GqaGenerationCache cache)
         {
+            var hidden = ForwardIncrementalHidden(newTokens, cache);
+            return ComputeLogits(_finalNorm.Forward(hidden));
+        }
+
+        /// <summary>
+        /// Processes all tokens into the KV cache but computes logits only for the final token.
+        /// This is the output required by autoregressive generation and avoids projecting every
+        /// prompt position across the full vocabulary.
+        /// </summary>
+        public float[] ForwardIncrementalLastToken(int[] newTokens, GqaGenerationCache cache)
+        {
+            var hidden = ForwardIncrementalHidden(newTokens, cache);
+            var lastHidden = new float[1, _config.HiddenSize];
+            Buffer.BlockCopy(
+                hidden,
+                (hidden.GetLength(0) - 1) * _config.HiddenSize * sizeof(float),
+                lastHidden,
+                0,
+                _config.HiddenSize * sizeof(float));
+
+            var logits = ComputeLogits(_finalNorm.Forward(lastHidden));
+            var result = new float[_config.VocabSize];
+            Buffer.BlockCopy(logits, 0, result, 0, result.Length * sizeof(float));
+            return result;
+        }
+
+        private float[,] ForwardIncrementalHidden(int[] newTokens, GqaGenerationCache cache)
+        {
             if (newTokens == null || newTokens.Length == 0)
                 throw new ArgumentException("newTokens no puede ser nulo ni vacío", nameof(newTokens));
 
@@ -147,10 +194,7 @@ namespace Neuraval.Core.Models
             for (int i = 0; i < _blocks.Count; i++)
                 hiddenBatch = _blocks[i].ForwardIncremental(hiddenBatch, positionOffset, cache.Layers[i]);
 
-            var hidden = FromBatch(hiddenBatch);
-            hidden = _finalNorm.Forward(hidden);
-
-            return ComputeLogits(hidden);
+            return FromBatch(hiddenBatch);
         }
 
         private (float[,] hidden, float[,] logits) ForwardWithHiddenStates(int[] inputTokens)
@@ -177,10 +221,28 @@ namespace Neuraval.Core.Models
 
         private float[,] ComputeLogits(float[,] hidden)
         {
-            var hiddenTensor = Neuraval.Tensor.Tensor.FromArray2D(hidden);
-            var logitsTensor = TensorOps.MatMulTransposeBCachedB(hiddenTensor, OutputWeightsRef, _outputProjectionCache);
+            if (_inferenceOnly)
+            {
+                var hiddenTensorQ8 = Neuraval.Tensor.Tensor.FromArray2D(hidden, DeviceType.Cpu);
+                var quantizedOutput = _config.TieWordEmbeddings
+                    ? _embedding.QuantizedEmbeddings!
+                    : _outputWeightsQ8!;
+                return quantizedOutput.Multiply(hiddenTensorQ8).ToArray2D();
+            }
 
-            return logitsTensor.ToArray2D();
+            var device = TensorDeviceSelector.Current;
+            try
+            {
+                var hiddenTensor = Neuraval.Tensor.Tensor.FromArray2D(hidden, device);
+                var logitsTensor = TensorOps.MatMulTransposeBCachedB(hiddenTensor, OutputWeightsRef, _outputProjectionCache);
+
+                return logitsTensor.ToArray2D();
+            }
+            catch (CudaException) when (device == DeviceType.Cuda)
+            {
+                TensorDeviceSelector.ReportFailure();
+                return ComputeLogits(hidden);
+            }
         }
 
         private static float[,,] ToBatch(float[,] input)
@@ -207,6 +269,7 @@ namespace Neuraval.Core.Models
 
         public float CalculateCausalLoss(int[] sequenceTokens, int lossStartIndex)
         {
+            EnsureTrainingEnabled();
             if (sequenceTokens == null || sequenceTokens.Length < 2)
                 throw new ArgumentException("sequenceTokens must contain at least two tokens");
 
@@ -282,6 +345,7 @@ namespace Neuraval.Core.Models
 
         public void UpdateWeights(float learningRate)
         {
+            EnsureTrainingEnabled();
             _embedding.UpdateWeights(learningRate);
 
             foreach (var block in _blocks)
@@ -300,6 +364,7 @@ namespace Neuraval.Core.Models
 
         public void ResetGradients()
         {
+            EnsureTrainingEnabled();
             _embedding.ResetGradients();
 
             foreach (var block in _blocks)
@@ -316,6 +381,7 @@ namespace Neuraval.Core.Models
 
         public ModernDecoderModelState SaveState()
         {
+            EnsureTrainingEnabled();
             var state = new ModernDecoderModelState
             {
                 Config = _config.Clone(),
@@ -336,28 +402,63 @@ namespace Neuraval.Core.Models
             return state;
         }
 
-        public static ModernDecoderModel LoadState(ModernDecoderModelState state)
+        /// <summary>Loads a model from state; inference-only mode omits training buffers and consumes large flattened load buffers.</summary>
+        public static ModernDecoderModel LoadState(ModernDecoderModelState state, bool inferenceOnly = false)
         {
-            var model = new ModernDecoderModel(state.Config, seed: 42);
+            var model = new ModernDecoderModel(state.Config, seed: 42, inferenceOnly: inferenceOnly);
 
-            model._embedding = EmbeddingLayer.LoadState(state.EmbeddingState);
-            model._finalNorm = RMSNorm.LoadState(state.FinalNormState);
+            model._embedding = EmbeddingLayer.LoadState(state.EmbeddingState, inferenceOnly);
+            if (inferenceOnly)
+                state.EmbeddingState.Embeddings = Array.Empty<float>();
+            model._finalNorm = RMSNorm.LoadState(state.FinalNormState, inferenceOnly);
 
             model._blocks = new List<ModernDecoderBlock>();
             foreach (var blockState in state.BlockStates)
-                model._blocks.Add(ModernDecoderBlock.LoadState(blockState));
+            {
+                model._blocks.Add(ModernDecoderBlock.LoadState(blockState, inferenceOnly));
+                if (inferenceOnly)
+                {
+                    // Feed-forward state is flattened; its loaded matrices now own the data.
+                    // Drop the temporary arrays promptly so the GC can reclaim them between layers.
+                    blockState.FeedforwardState.WeightsGate = Array.Empty<float>();
+                    blockState.FeedforwardState.WeightsUp = Array.Empty<float>();
+                    blockState.FeedforwardState.WeightsDown = Array.Empty<float>();
+                    // Attention matrices were requantized into the runtime Q8 representation.
+                    blockState.AttentionState.Wq = new float[0, 0];
+                    blockState.AttentionState.Wk = new float[0, 0];
+                    blockState.AttentionState.Wv = new float[0, 0];
+                    blockState.AttentionState.Wo = new float[0, 0];
+                }
+            }
 
             if (!state.Config.TieWordEmbeddings && state.OutputWeights != null)
             {
-                model._outputWeights = UnflattenMatrix(state.OutputWeights, state.Config.VocabSize, state.Config.HiddenSize);
+                if (inferenceOnly)
+                {
+                    model._outputWeightsQ8 = QuantizedMatrixQ8.FromOutputMajor(
+                        state.OutputWeights, state.Config.VocabSize, state.Config.HiddenSize);
+                    state.OutputWeights = null;
+                }
+                else
+                {
+                    model._outputWeights = UnflattenMatrix(state.OutputWeights, state.Config.VocabSize, state.Config.HiddenSize);
+                }
 
-                if (state.OutputWeightsOptimizerState != null)
+                if (!inferenceOnly && state.OutputWeightsOptimizerState != null)
                     model._outputWeightsOptimizer!.LoadStateInto(state.OutputWeightsOptimizerState);
             }
 
             model._outputProjectionCache.Invalidate();
 
             return model;
+        }
+
+        public bool IsInferenceOnly => _inferenceOnly;
+
+        private void EnsureTrainingEnabled()
+        {
+            if (_inferenceOnly)
+                throw new InvalidOperationException("Este modelo se cargó en modo de inferencia y no conserva gradientes ni estado de entrenamiento.");
         }
 
         private static float[] FlattenMatrix(float[,] matrix)

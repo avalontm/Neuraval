@@ -11,7 +11,8 @@ namespace Neuraval.Core.Models
         private float[] _weight;
         private float[] _weightGradients;
         private float[] _accumulatedWeightGradients;
-        private AdamVectorOptimizer _weightOptimizer;
+        private AdamVectorOptimizer _weightOptimizer = null!;
+        private readonly bool _inferenceOnly;
 
         private float[,]? _lastInput;
         private float[]? _lastRms;
@@ -22,15 +23,17 @@ namespace Neuraval.Core.Models
         public int NormalizedShape => _normalizedShape;
         public float Epsilon => _epsilon;
 
-        public RMSNorm(int normalizedShape, float epsilon = 1e-6f)
+        public RMSNorm(int normalizedShape, float epsilon = 1e-6f, bool inferenceOnly = false)
         {
             _normalizedShape = normalizedShape;
             _epsilon = epsilon;
+            _inferenceOnly = inferenceOnly;
 
             _weight = new float[normalizedShape];
-            _weightGradients = new float[normalizedShape];
-            _accumulatedWeightGradients = new float[normalizedShape];
-            _weightOptimizer = new AdamVectorOptimizer(normalizedShape);
+            _weightGradients = inferenceOnly ? Array.Empty<float>() : new float[normalizedShape];
+            _accumulatedWeightGradients = inferenceOnly ? Array.Empty<float>() : new float[normalizedShape];
+            if (!inferenceOnly)
+                _weightOptimizer = new AdamVectorOptimizer(normalizedShape);
 
             for (int i = 0; i < normalizedShape; i++)
             {
@@ -84,7 +87,8 @@ namespace Neuraval.Core.Models
             if (dim != _normalizedShape)
                 throw new ArgumentException($"Input dimension {dim} does not match normalized shape {_normalizedShape}");
 
-            _lastInput = (float[,])input.Clone();
+            if (!_inferenceOnly)
+                _lastInput = (float[,])input.Clone();
 
             var output = new float[rows, dim];
             var rms = new float[rows];
@@ -106,7 +110,8 @@ namespace Neuraval.Core.Models
                 }
             });
 
-            _lastRms = rms;
+            if (!_inferenceOnly)
+                _lastRms = rms;
 
             return output;
         }
@@ -182,12 +187,13 @@ namespace Neuraval.Core.Models
             if (dim != _normalizedShape)
                 throw new ArgumentException($"Input dimension {dim} does not match normalized shape {_normalizedShape}");
 
-            _lastInputBatch = (float[,,])inputBatch.Clone();
+            if (!_inferenceOnly)
+                _lastInputBatch = (float[,,])inputBatch.Clone();
 
             var output = new float[batchSize, seqLen, dim];
             var rms = new float[batchSize, seqLen];
 
-            Parallel.For(0, batchSize * seqLen, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, flatIndex =>
+            Action<int> normalizeRow = flatIndex =>
             {
                 int b = flatIndex / seqLen;
                 int s = flatIndex % seqLen;
@@ -205,9 +211,21 @@ namespace Neuraval.Core.Models
                 {
                     output[b, s, j] = (inputBatch[b, s, j] / rowRms) * _weight[j];
                 }
-            });
+            };
 
-            _lastRmsBatch = rms;
+            int rowCount = batchSize * seqLen;
+            if (rowCount <= 2)
+            {
+                for (int row = 0; row < rowCount; row++)
+                    normalizeRow(row);
+            }
+            else
+            {
+                Parallel.For(0, rowCount, new ParallelOptions { MaxDegreeOfParallelism = Matematicas.GetNumThreads() }, normalizeRow);
+            }
+
+            if (!_inferenceOnly)
+                _lastRmsBatch = rms;
 
             return output;
         }
@@ -274,12 +292,12 @@ namespace Neuraval.Core.Models
             };
         }
 
-        public static RMSNorm LoadState(RMSNormState state)
+        public static RMSNorm LoadState(RMSNormState state, bool inferenceOnly = false)
         {
-            var norm = new RMSNorm(state.NormalizedShape, state.Epsilon);
-            norm._weight = (float[])state.Weight.Clone();
+            var norm = new RMSNorm(state.NormalizedShape, state.Epsilon, inferenceOnly);
+            norm._weight = inferenceOnly ? state.Weight : (float[])state.Weight.Clone();
 
-            if (state.WeightOptimizerState != null) norm._weightOptimizer.LoadStateInto(state.WeightOptimizerState);
+            if (!inferenceOnly && state.WeightOptimizerState != null) norm._weightOptimizer.LoadStateInto(state.WeightOptimizerState);
 
             return norm;
         }

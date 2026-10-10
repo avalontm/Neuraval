@@ -59,6 +59,27 @@ namespace Neuraval.Tests
         }
 
         [Fact]
+        public void Append_MultipleBatchesAndTokens_PreservesCacheStrides()
+        {
+            var cache = new GqaKeyValueCacheLayer(batchSize: 2, capacity: 4, numKeyValueHeads: 2, headDim: 2);
+            var keys = RandomBlock(2, 2, 2, 2, seed: 11);
+            var values = RandomBlock(2, 2, 2, 2, seed: 12);
+
+            cache.Append(keys, values);
+
+            var storedKeys = cache.GetKeys();
+            var storedValues = cache.GetValues();
+            for (int batch = 0; batch < 2; batch++)
+                for (int token = 0; token < 2; token++)
+                    for (int head = 0; head < 2; head++)
+                        for (int dimension = 0; dimension < 2; dimension++)
+                        {
+                            Assert.Equal(keys[batch, token, head, dimension], storedKeys[batch, token, head, dimension]);
+                            Assert.Equal(values[batch, token, head, dimension], storedValues[batch, token, head, dimension]);
+                        }
+        }
+
+        [Fact]
         public void Append_ExceedingCapacity_Throws()
         {
             var cache = new GqaKeyValueCacheLayer(batchSize: 1, capacity: 2, numKeyValueHeads: 1, headDim: 2);

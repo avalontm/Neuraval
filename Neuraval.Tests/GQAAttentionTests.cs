@@ -62,6 +62,32 @@ namespace Neuraval.Tests
         }
 
         [Fact]
+        public void Forward_AppliesLoadedQkvBiases()
+        {
+            var attention = new GQAAttentionState
+            {
+                HiddenSize = 2,
+                NumAttentionHeads = 1,
+                NumKeyValueHeads = 1,
+                Wq = new float[2, 2],
+                Wk = new float[2, 2],
+                Wv = new float[2, 2],
+                Wo = new float[,] { { 1f, 0f }, { 0f, 1f } },
+                Bq = new[] { 1f, -1f },
+                Bk = new[] { 0.5f, -0.5f },
+                Bv = new[] { 2f, -3f }
+            };
+
+            var model = GQAAttention.LoadState(attention);
+            var output = model.Forward(new float[1, 1, 2]);
+
+            Assert.Equal(2f, output[0, 0, 0], 5);
+            Assert.Equal(-3f, output[0, 0, 1], 5);
+            Assert.Equal(attention.Bq, model.SaveState().Bq);
+            Assert.Equal(attention.Bk, model.SaveState().Bk);
+        }
+
+        [Fact]
         public void Forward_WithMultiQueryAttention_RunsWithSingleKeyValueHead()
         {
             var mqa = new GQAAttention(hiddenSize: 8, numAttentionHeads: 4, numKeyValueHeads: 1, seed: 2);
@@ -182,7 +208,10 @@ namespace Neuraval.Tests
                 Wq = (float[,])state.Wq.Clone(),
                 Wk = (float[,])state.Wk.Clone(),
                 Wv = (float[,])state.Wv.Clone(),
-                Wo = (float[,])state.Wo.Clone()
+                Wo = (float[,])state.Wo.Clone(),
+                Bq = (float[])state.Bq.Clone(),
+                Bk = (float[])state.Bk.Clone(),
+                Bv = (float[])state.Bv.Clone()
             };
         }
 

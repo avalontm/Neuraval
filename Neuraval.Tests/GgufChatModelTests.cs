@@ -13,6 +13,16 @@ namespace Neuraval.Tests
 {
     public class GgufChatModelTests
     {
+        [Fact]
+        public void Options_DefaultToLowTemperatureSampling()
+        {
+            var options = new GgufChatModelOptions();
+
+            Assert.False(options.Greedy);
+            Assert.Equal(0.2f, options.Temperature);
+            Assert.Equal(1.0f, options.RepetitionPenalty);
+        }
+
         private static (ModernDecoderModel Model, ModernBpeTokenizer Tokenizer) BuildTinyModelAndTokenizer()
         {
             var tokenizer = new ModernBpeTokenizer();
@@ -67,6 +77,24 @@ namespace Neuraval.Tests
 
             Assert.Equal(ChatRole.Assistant, response.Role);
             Assert.NotNull(response.Content);
+        }
+
+        [Fact]
+        public async Task SendStreamingAsync_EmitsTextThatMatchesFinalAssistantMessage()
+        {
+            var (model, tokenizer) = BuildTinyModelAndTokenizer();
+            var chatModel = new GgufChatModel(model, tokenizer, new GgufChatModelOptions
+            {
+                Greedy = true,
+                MaxNewTokens = 8
+            });
+            var messages = new List<ChatMessage> { new(ChatRole.User, "hola") };
+            var streamed = new System.Text.StringBuilder();
+
+            var response = await chatModel.SendStreamingAsync(messages, chunk => streamed.Append(chunk));
+
+            Assert.Equal(response.Content, streamed.ToString().Trim());
+            Assert.NotNull(chatModel.LastPerformanceReport);
         }
 
         [Fact]

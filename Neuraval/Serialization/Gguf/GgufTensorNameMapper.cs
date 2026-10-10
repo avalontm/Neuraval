@@ -40,8 +40,11 @@ namespace Neuraval.Core.Serialization.Gguf
                 {
                     "attn_norm.weight" => TensorNameMapper.InputLayerNormName(layerIndex),
                     "attn_q.weight" => TensorNameMapper.SelfAttnQProjName(layerIndex),
+                    "attn_q.bias" => TensorNameMapper.SelfAttnQProjBiasName(layerIndex),
                     "attn_k.weight" => TensorNameMapper.SelfAttnKProjName(layerIndex),
+                    "attn_k.bias" => TensorNameMapper.SelfAttnKProjBiasName(layerIndex),
                     "attn_v.weight" => TensorNameMapper.SelfAttnVProjName(layerIndex),
+                    "attn_v.bias" => TensorNameMapper.SelfAttnVProjBiasName(layerIndex),
                     "attn_output.weight" => TensorNameMapper.SelfAttnOProjName(layerIndex),
                     "ffn_norm.weight" => TensorNameMapper.PostAttentionLayerNormName(layerIndex),
                     "ffn_gate.weight" => TensorNameMapper.MlpGateProjName(layerIndex),

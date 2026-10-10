@@ -64,6 +64,27 @@ namespace Neuraval.Tests
         }
 
         [Fact]
+        public void Encode_Qwen2PreTokenizer_GroupsOneToThreeDigitsLikeQwen()
+        {
+            var tokenizer = new ModernBpeTokenizer();
+            tokenizer.Train(new List<string> { "123", "123", "123", "456" }, numMerges: 20, minPairFrequency: 1);
+
+            var smolState = tokenizer.SaveState();
+            smolState.PreTokenizer = "smollm";
+            var qwenState = tokenizer.SaveState();
+            qwenState.PreTokenizer = "qwen2";
+
+            var smolTokenizer = ModernBpeTokenizer.LoadState(smolState);
+            var qwenTokenizer = ModernBpeTokenizer.LoadState(qwenState);
+            const string text = "123";
+
+            var smolIds = smolTokenizer.Encode(text, addSpecialTokens: false);
+            var qwenIds = qwenTokenizer.Encode(text, addSpecialTokens: false);
+
+            Assert.True(qwenIds.Length < smolIds.Length);
+        }
+
+        [Fact]
         public void Encode_AddsStartAndEndTokens()
         {
             var tokenizer = new ModernBpeTokenizer();

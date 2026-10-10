@@ -1,6 +1,8 @@
 using System;
+using Neuraval.Cuda;
 using Neuraval.Core.Models.RoPE;
 using Neuraval.Core.Utils;
+using Neuraval.Tensor;
 
 namespace Neuraval.Core.Models
 {
@@ -13,21 +15,35 @@ namespace Neuraval.Core.Models
         private readonly int _numGroups;
         private readonly int _kvDim;
         private readonly RotaryEmbedding? _rotary;
+        private readonly bool _inferenceOnly;
 
         private float[,] _wq;
         private float[,] _wk;
         private float[,] _wv;
         private float[,] _wo;
+        private readonly CudaWeightCache _wqkvCache;
+        private readonly CudaWeightCache _wqCache;
+        private readonly CudaWeightCache _wkCache;
+        private readonly CudaWeightCache _wvCache;
+        private readonly CudaWeightCache _woCache;
+        private float[,]? _combinedQkvWeights;
+        private QuantizedMatrixQ8? _wqQ8;
+        private QuantizedMatrixQ8? _wkQ8;
+        private QuantizedMatrixQ8? _wvQ8;
+        private QuantizedMatrixQ8? _woQ8;
+        private float[] _bq;
+        private float[] _bk;
+        private float[] _bv;
 
         private float[,] _wqGradients;
         private float[,] _wkGradients;
         private float[,] _wvGradients;
         private float[,] _woGradients;
 
-        private AdamMatrixOptimizer _wqOptimizer;
-        private AdamMatrixOptimizer _wkOptimizer;
-        private AdamMatrixOptimizer _wvOptimizer;
-        private AdamMatrixOptimizer _woOptimizer;
+        private AdamMatrixOptimizer _wqOptimizer = null!;
+        private AdamMatrixOptimizer _wkOptimizer = null!;
+        private AdamMatrixOptimizer _wvOptimizer = null!;
+        private AdamMatrixOptimizer _woOptimizer = null!;
 
         private float[,,]? _lastInput;
         private float[,,,]? _lastQRotated;
@@ -42,7 +58,7 @@ namespace Neuraval.Core.Models
         public int NumKeyValueHeads => _numKeyValueHeads;
         public int HeadDim => _headDim;
 
-        public GQAAttention(int hiddenSize, int numAttentionHeads, int numKeyValueHeads, RotaryEmbedding? rotary = null, int seed = 42)
+        public GQAAttention(int hiddenSize, int numAttentionHeads, int numKeyValueHeads, RotaryEmbedding? rotary = null, int seed = 42, bool inferenceOnly = false)
         {
             if (hiddenSize % numAttentionHeads != 0)
                 throw new ArgumentException($"hiddenSize ({hiddenSize}) debe ser divisible por numAttentionHeads ({numAttentionHeads})");
@@ -57,25 +73,38 @@ namespace Neuraval.Core.Models
             _numGroups = numAttentionHeads / numKeyValueHeads;
             _kvDim = numKeyValueHeads * _headDim;
             _rotary = rotary;
+            _inferenceOnly = inferenceOnly;
+            _bq = new float[hiddenSize];
+            _bk = new float[_kvDim];
+            _bv = new float[_kvDim];
 
             var random = new Random(seed);
             float qLimit = MathF.Sqrt(6f / (hiddenSize + hiddenSize));
             float kvLimit = MathF.Sqrt(6f / (hiddenSize + _kvDim));
 
-            _wq = InitializeMatrix(hiddenSize, hiddenSize, qLimit, random);
-            _wk = InitializeMatrix(hiddenSize, _kvDim, kvLimit, random);
-            _wv = InitializeMatrix(hiddenSize, _kvDim, kvLimit, random);
-            _wo = InitializeMatrix(hiddenSize, hiddenSize, qLimit, random);
+            _wq = inferenceOnly ? null! : InitializeMatrix(hiddenSize, hiddenSize, qLimit, random);
+            _wk = inferenceOnly ? null! : InitializeMatrix(hiddenSize, _kvDim, kvLimit, random);
+            _wv = inferenceOnly ? null! : InitializeMatrix(hiddenSize, _kvDim, kvLimit, random);
+            _wo = inferenceOnly ? null! : InitializeMatrix(hiddenSize, hiddenSize, qLimit, random);
 
-            _wqGradients = new float[hiddenSize, hiddenSize];
-            _wkGradients = new float[hiddenSize, _kvDim];
-            _wvGradients = new float[hiddenSize, _kvDim];
-            _woGradients = new float[hiddenSize, hiddenSize];
+            _wqkvCache = new CudaWeightCache(hiddenSize, hiddenSize + (2 * _kvDim));
+            _wqCache = new CudaWeightCache(hiddenSize, hiddenSize);
+            _wkCache = new CudaWeightCache(hiddenSize, _kvDim);
+            _wvCache = new CudaWeightCache(hiddenSize, _kvDim);
+            _woCache = new CudaWeightCache(hiddenSize, hiddenSize);
 
-            _wqOptimizer = new AdamMatrixOptimizer(hiddenSize, hiddenSize);
-            _wkOptimizer = new AdamMatrixOptimizer(hiddenSize, _kvDim);
-            _wvOptimizer = new AdamMatrixOptimizer(hiddenSize, _kvDim);
-            _woOptimizer = new AdamMatrixOptimizer(hiddenSize, hiddenSize);
+            _wqGradients = inferenceOnly ? new float[0, 0] : new float[hiddenSize, hiddenSize];
+            _wkGradients = inferenceOnly ? new float[0, 0] : new float[hiddenSize, _kvDim];
+            _wvGradients = inferenceOnly ? new float[0, 0] : new float[hiddenSize, _kvDim];
+            _woGradients = inferenceOnly ? new float[0, 0] : new float[hiddenSize, hiddenSize];
+
+            if (!inferenceOnly)
+            {
+                _wqOptimizer = new AdamMatrixOptimizer(hiddenSize, hiddenSize);
+                _wkOptimizer = new AdamMatrixOptimizer(hiddenSize, _kvDim);
+                _wvOptimizer = new AdamMatrixOptimizer(hiddenSize, _kvDim);
+                _woOptimizer = new AdamMatrixOptimizer(hiddenSize, hiddenSize);
+            }
         }
 
         private static float[,] InitializeMatrix(int rows, int cols, float limit, Random random)
@@ -95,12 +124,11 @@ namespace Neuraval.Core.Models
             if (input.GetLength(2) != _hiddenSize)
                 throw new ArgumentException($"La última dimensión de entrada ({input.GetLength(2)}) no coincide con hiddenSize ({_hiddenSize})");
 
-            _lastInput = (float[,,])input.Clone();
+            if (!_inferenceOnly)
+                _lastInput = (float[,,])input.Clone();
             _lastPositionOffset = positionOffset;
 
-            var q = ProjectHeads(input, _wq, _numAttentionHeads, batchSize, seqLen);
-            var k = ProjectHeads(input, _wk, _numKeyValueHeads, batchSize, seqLen);
-            var v = ProjectHeads(input, _wv, _numKeyValueHeads, batchSize, seqLen);
+            var (q, k, v) = ProjectQkvHeads(input, batchSize, seqLen);
 
             if (_rotary != null)
             {
@@ -108,11 +136,14 @@ namespace Neuraval.Core.Models
                 k = _rotary.Apply(k, positionOffset);
             }
 
-            _lastQRotated = q;
-            _lastKRotated = k;
-            _lastV = v;
+            if (!_inferenceOnly)
+            {
+                _lastQRotated = q;
+                _lastKRotated = k;
+                _lastV = v;
+            }
 
-            var probabilities = new float[batchSize, _numAttentionHeads, seqLen, seqLen];
+            var probabilities = _inferenceOnly ? null : new float[batchSize, _numAttentionHeads, seqLen, seqLen];
             var contextConcat = new float[batchSize, seqLen, _hiddenSize];
 
             for (int b = 0; b < batchSize; b++)
@@ -147,7 +178,8 @@ namespace Neuraval.Core.Models
                         for (int j = 0; j <= i; j++)
                         {
                             float p = scores[j] / sumExp;
-                            probabilities[b, qh, i, j] = p;
+                            if (probabilities != null)
+                                probabilities[b, qh, i, j] = p;
 
                             for (int d = 0; d < _headDim; d++)
                                 contextConcat[b, i, qh * _headDim + d] += p * v[b, j, kvh, d];
@@ -156,25 +188,93 @@ namespace Neuraval.Core.Models
                 }
             }
 
-            _lastProbabilities = probabilities;
-            _lastContextConcat = contextConcat;
+            if (!_inferenceOnly)
+            {
+                _lastProbabilities = probabilities;
+                _lastContextConcat = contextConcat;
+            }
 
-            return MatMulBatch(contextConcat, _wo, batchSize, seqLen, _hiddenSize, _hiddenSize);
+            return _inferenceOnly
+                ? MatMulBatch(contextConcat, _woQ8!, batchSize, seqLen)
+                : MatMulBatch(contextConcat, _wo, _woCache, batchSize, seqLen, _hiddenSize, _hiddenSize);
         }
 
-        private float[,,,] ProjectHeads(float[,,] input, float[,] weight, int numHeads, int batchSize, int seqLen)
+        private (float[,,,] Queries, float[,,,] Keys, float[,,,] Values) ProjectQkvHeads(float[,,] input, int batchSize, int seqLen)
         {
-            int outDim = weight.GetLength(1);
-            var flatOut = MatMulBatch(input, weight, batchSize, seqLen, _hiddenSize, outDim);
-
-            var reshaped = new float[batchSize, seqLen, numHeads, _headDim];
+            float[,,] flatOut;
+            int combinedDim = _hiddenSize + (2 * _kvDim);
+            if (_inferenceOnly)
+            {
+                var q = MatMulBatch(input, _wqQ8!, batchSize, seqLen);
+                var k = MatMulBatch(input, _wkQ8!, batchSize, seqLen);
+                var v = MatMulBatch(input, _wvQ8!, batchSize, seqLen);
+                flatOut = new float[batchSize, seqLen, combinedDim];
+                int rowBytes = combinedDim * sizeof(float);
+                int projectedQueryBytes = _hiddenSize * sizeof(float);
+                int projectedKvBytes = _kvDim * sizeof(float);
+                for (int b = 0; b < batchSize; b++)
+                    for (int s = 0; s < seqLen; s++)
+                    {
+                        int row = b * seqLen + s;
+                        Buffer.BlockCopy(q, row * projectedQueryBytes, flatOut, row * rowBytes, projectedQueryBytes);
+                        Buffer.BlockCopy(k, row * projectedKvBytes, flatOut, row * rowBytes + projectedQueryBytes, projectedKvBytes);
+                        Buffer.BlockCopy(v, row * projectedKvBytes, flatOut, row * rowBytes + projectedQueryBytes + projectedKvBytes, projectedKvBytes);
+                    }
+            }
+            else
+            {
+                var combinedWeights = _combinedQkvWeights ??= CombineQkvWeights();
+                flatOut = MatMulBatch(input, combinedWeights, _wqkvCache, batchSize, seqLen, _hiddenSize, combinedWeights.GetLength(1));
+            }
+            AddQkvBias(flatOut);
+            var queries = new float[batchSize, seqLen, _numAttentionHeads, _headDim];
+            var keys = new float[batchSize, seqLen, _numKeyValueHeads, _headDim];
+            var values = new float[batchSize, seqLen, _numKeyValueHeads, _headDim];
+            int queryBytes = _hiddenSize * sizeof(float);
+            int kvBytes = _kvDim * sizeof(float);
             for (int b = 0; b < batchSize; b++)
                 for (int s = 0; s < seqLen; s++)
-                    for (int h = 0; h < numHeads; h++)
-                        for (int d = 0; d < _headDim; d++)
-                            reshaped[b, s, h, d] = flatOut[b, s, h * _headDim + d];
+                {
+                    int row = b * seqLen + s;
+                    Buffer.BlockCopy(flatOut, row * combinedDim * sizeof(float), queries, row * queryBytes, queryBytes);
+                    Buffer.BlockCopy(flatOut, (row * combinedDim + _hiddenSize) * sizeof(float), keys, row * kvBytes, kvBytes);
+                    Buffer.BlockCopy(flatOut, (row * combinedDim + _hiddenSize + _kvDim) * sizeof(float), values, row * kvBytes, kvBytes);
+                }
 
-            return reshaped;
+            return (queries, keys, values);
+        }
+
+        private float[,] CombineQkvWeights()
+        {
+            var combined = new float[_hiddenSize, _hiddenSize + (2 * _kvDim)];
+            for (int input = 0; input < _hiddenSize; input++)
+            {
+                for (int output = 0; output < _hiddenSize; output++)
+                    combined[input, output] = _wq[input, output];
+
+                for (int output = 0; output < _kvDim; output++)
+                {
+                    combined[input, _hiddenSize + output] = _wk[input, output];
+                    combined[input, _hiddenSize + _kvDim + output] = _wv[input, output];
+                }
+            }
+
+            return combined;
+        }
+
+        private void AddQkvBias(float[,,] projected)
+        {
+            for (int batch = 0; batch < projected.GetLength(0); batch++)
+                for (int token = 0; token < projected.GetLength(1); token++)
+            {
+                for (int i = 0; i < _hiddenSize; i++)
+                    projected[batch, token, i] += _bq[i];
+                for (int i = 0; i < _kvDim; i++)
+                {
+                    projected[batch, token, _hiddenSize + i] += _bk[i];
+                    projected[batch, token, _hiddenSize + _kvDim + i] += _bv[i];
+                }
+            }
         }
 
         public float[,,] ForwardIncremental(float[,,] input, int positionOffset, GqaKeyValueCacheLayer cache)
@@ -191,9 +291,7 @@ namespace Neuraval.Core.Models
             if (cache.NumKeyValueHeads != _numKeyValueHeads || cache.HeadDim != _headDim)
                 throw new ArgumentException("El cache no es compatible con esta capa de atención");
 
-            var q = ProjectHeads(input, _wq, _numAttentionHeads, batchSize, newSeqLen);
-            var k = ProjectHeads(input, _wk, _numKeyValueHeads, batchSize, newSeqLen);
-            var v = ProjectHeads(input, _wv, _numKeyValueHeads, batchSize, newSeqLen);
+            var (q, k, v) = ProjectQkvHeads(input, batchSize, newSeqLen);
 
             if (_rotary != null)
             {
@@ -203,11 +301,9 @@ namespace Neuraval.Core.Models
 
             cache.Append(k, v);
 
-            var cachedKeys = cache.GetKeys();
-            var cachedValues = cache.GetValues();
-
             var contextConcat = new float[batchSize, newSeqLen, _hiddenSize];
             float scale = 1f / MathF.Sqrt(_headDim);
+            var scores = new float[cache.Length];
 
             for (int b = 0; b < batchSize; b++)
             {
@@ -218,14 +314,13 @@ namespace Neuraval.Core.Models
                     for (int i = 0; i < newSeqLen; i++)
                     {
                         int allowedLength = positionOffset + i + 1;
-                        var scores = new float[allowedLength];
                         float maxScore = float.NegativeInfinity;
 
                         for (int j = 0; j < allowedLength; j++)
                         {
                             float dot = 0f;
                             for (int d = 0; d < _headDim; d++)
-                                dot += q[b, i, qh, d] * cachedKeys[b, j, kvh, d];
+                                dot += q[b, i, qh, d] * cache.KeyAt(b, j, kvh, d);
 
                             scores[j] = dot * scale;
                             if (scores[j] > maxScore) maxScore = scores[j];
@@ -243,34 +338,48 @@ namespace Neuraval.Core.Models
                             float p = scores[j] / sumExp;
 
                             for (int d = 0; d < _headDim; d++)
-                                contextConcat[b, i, qh * _headDim + d] += p * cachedValues[b, j, kvh, d];
+                                contextConcat[b, i, qh * _headDim + d] += p * cache.ValueAt(b, j, kvh, d);
                         }
                     }
                 }
             }
 
-            return MatMulBatch(contextConcat, _wo, batchSize, newSeqLen, _hiddenSize, _hiddenSize);
+            return _inferenceOnly
+                ? MatMulBatch(contextConcat, _woQ8!, batchSize, newSeqLen)
+                : MatMulBatch(contextConcat, _wo, _woCache, batchSize, newSeqLen, _hiddenSize, _hiddenSize);
         }
 
-        private static float[,,] MatMulBatch(float[,,] input, float[,] weight, int batchSize, int seqLen, int inDim, int outDim)
+        private static float[,,] MatMulBatch(float[,,] input, QuantizedMatrixQ8 weights, int batchSize, int seqLen)
         {
-            var output = new float[batchSize, seqLen, outDim];
-
-            for (int b = 0; b < batchSize; b++)
-            {
-                for (int s = 0; s < seqLen; s++)
-                {
-                    for (int o = 0; o < outDim; o++)
-                    {
-                        float sum = 0f;
-                        for (int i = 0; i < inDim; i++)
-                            sum += input[b, s, i] * weight[i, o];
-                        output[b, s, o] = sum;
-                    }
-                }
-            }
-
+            int inputDim = input.GetLength(2);
+            var flatInput = new float[batchSize * seqLen, inputDim];
+            Buffer.BlockCopy(input, 0, flatInput, 0, batchSize * seqLen * inputDim * sizeof(float));
+            var inputTensor = Neuraval.Tensor.Tensor.FromArray2D(flatInput, DeviceType.Cpu);
+            var flatOutput = weights.Multiply(inputTensor).ToArray2D();
+            var output = new float[batchSize, seqLen, weights.OutputSize];
+            Buffer.BlockCopy(flatOutput, 0, output, 0, batchSize * seqLen * weights.OutputSize * sizeof(float));
             return output;
+        }
+
+        private static float[,,] MatMulBatch(float[,,] input, float[,] weight, CudaWeightCache cache, int batchSize, int seqLen, int inDim, int outDim)
+        {
+            var flatInput = new float[batchSize * seqLen, inDim];
+            Buffer.BlockCopy(input, 0, flatInput, 0, batchSize * seqLen * inDim * sizeof(float));
+            var device = TensorDeviceSelector.Current;
+
+            try
+            {
+                var inputTensor = Neuraval.Tensor.Tensor.FromArray2D(flatInput, device);
+                var result = TensorOps.MatMulCachedB(inputTensor, weight, cache).ToArray2D();
+                var output = new float[batchSize, seqLen, outDim];
+                Buffer.BlockCopy(result, 0, output, 0, batchSize * seqLen * outDim * sizeof(float));
+                return output;
+            }
+            catch (CudaException) when (device == DeviceType.Cuda)
+            {
+                TensorDeviceSelector.ReportFailure();
+                return MatMulBatch(input, weight, cache, batchSize, seqLen, inDim, outDim);
+            }
         }
 
         public float[,,] Backward(float[,,] gradOutput)
@@ -437,6 +546,9 @@ namespace Neuraval.Core.Models
             _wkOptimizer.Update(_wk, _wkGradients, learningRate);
             _wvOptimizer.Update(_wv, _wvGradients, learningRate);
             _woOptimizer.Update(_wo, _woGradients, learningRate);
+            _combinedQkvWeights = null;
+            _wqkvCache.Invalidate();
+            _woCache.Invalidate();
             ZeroGradients();
         }
 
@@ -451,6 +563,9 @@ namespace Neuraval.Core.Models
                 Wk = (float[,])_wk.Clone(),
                 Wv = (float[,])_wv.Clone(),
                 Wo = (float[,])_wo.Clone(),
+                Bq = (float[])_bq.Clone(),
+                Bk = (float[])_bk.Clone(),
+                Bv = (float[])_bv.Clone(),
                 WqOptimizerState = _wqOptimizer.SaveState(),
                 WkOptimizerState = _wkOptimizer.SaveState(),
                 WvOptimizerState = _wvOptimizer.SaveState(),
@@ -458,18 +573,38 @@ namespace Neuraval.Core.Models
             };
         }
 
-        public static GQAAttention LoadState(GQAAttentionState state, RotaryEmbedding? rotary = null)
+        public static GQAAttention LoadState(GQAAttentionState state, RotaryEmbedding? rotary = null, bool inferenceOnly = false)
         {
-            var attention = new GQAAttention(state.HiddenSize, state.NumAttentionHeads, state.NumKeyValueHeads, rotary);
-            attention._wq = (float[,])state.Wq.Clone();
-            attention._wk = (float[,])state.Wk.Clone();
-            attention._wv = (float[,])state.Wv.Clone();
-            attention._wo = (float[,])state.Wo.Clone();
+            var attention = new GQAAttention(state.HiddenSize, state.NumAttentionHeads, state.NumKeyValueHeads, rotary, inferenceOnly: inferenceOnly);
+            if (inferenceOnly)
+            {
+                attention._wqQ8 = QuantizedMatrixQ8.FromInputOutput(state.Wq);
+                attention._wkQ8 = QuantizedMatrixQ8.FromInputOutput(state.Wk);
+                attention._wvQ8 = QuantizedMatrixQ8.FromInputOutput(state.Wv);
+                attention._woQ8 = QuantizedMatrixQ8.FromInputOutput(state.Wo);
+                attention._wq = null!;
+                attention._wk = null!;
+                attention._wv = null!;
+                attention._wo = null!;
+            }
+            else
+            {
+                attention._wq = (float[,])state.Wq.Clone();
+                attention._wk = (float[,])state.Wk.Clone();
+                attention._wv = (float[,])state.Wv.Clone();
+                attention._wo = (float[,])state.Wo.Clone();
+            }
+            if (state.Bq.Length == attention._bq.Length) attention._bq = inferenceOnly ? state.Bq : (float[])state.Bq.Clone();
+            if (state.Bk.Length == attention._bk.Length) attention._bk = inferenceOnly ? state.Bk : (float[])state.Bk.Clone();
+            if (state.Bv.Length == attention._bv.Length) attention._bv = inferenceOnly ? state.Bv : (float[])state.Bv.Clone();
+            attention._combinedQkvWeights = null;
+            attention._wqkvCache.Invalidate();
+            attention._woCache.Invalidate();
 
-            if (state.WqOptimizerState != null) attention._wqOptimizer.LoadStateInto(state.WqOptimizerState);
-            if (state.WkOptimizerState != null) attention._wkOptimizer.LoadStateInto(state.WkOptimizerState);
-            if (state.WvOptimizerState != null) attention._wvOptimizer.LoadStateInto(state.WvOptimizerState);
-            if (state.WoOptimizerState != null) attention._woOptimizer.LoadStateInto(state.WoOptimizerState);
+            if (!inferenceOnly && state.WqOptimizerState != null) attention._wqOptimizer.LoadStateInto(state.WqOptimizerState);
+            if (!inferenceOnly && state.WkOptimizerState != null) attention._wkOptimizer.LoadStateInto(state.WkOptimizerState);
+            if (!inferenceOnly && state.WvOptimizerState != null) attention._wvOptimizer.LoadStateInto(state.WvOptimizerState);
+            if (!inferenceOnly && state.WoOptimizerState != null) attention._woOptimizer.LoadStateInto(state.WoOptimizerState);
 
             return attention;
         }
@@ -484,6 +619,9 @@ namespace Neuraval.Core.Models
         public float[,] Wk { get; set; }
         public float[,] Wv { get; set; }
         public float[,] Wo { get; set; }
+        public float[] Bq { get; set; } = Array.Empty<float>();
+        public float[] Bk { get; set; } = Array.Empty<float>();
+        public float[] Bv { get; set; } = Array.Empty<float>();
         public AdamMatrixOptimizerState? WqOptimizerState { get; set; }
         public AdamMatrixOptimizerState? WkOptimizerState { get; set; }
         public AdamMatrixOptimizerState? WvOptimizerState { get; set; }

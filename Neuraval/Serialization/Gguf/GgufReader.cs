@@ -2,7 +2,9 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.ExceptionServices;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace Neuraval.Core.Serialization.Gguf
 {
@@ -68,13 +70,31 @@ namespace Neuraval.Core.Serialization.Gguf
 
             int dataStart = AlignUp(cursor.Position, alignment);
 
-            var tensors = new List<GgufTensorEntry>();
-            foreach (var info in tensorInfos)
+            var tensors = new GgufTensorEntry[tensorInfos.Count];
+            if (tensorInfos.Count >= 16)
             {
-                int absoluteOffset = dataStart + checked((int)info.Offset);
-                var entry = DecodeTensor(buffer, absoluteOffset, info);
-                tensors.Add(entry);
+                try
+                {
+                    Parallel.For(0, tensorInfos.Count, index =>
+                    {
+                        var info = tensorInfos[index];
+                        int absoluteOffset = dataStart + checked((int)info.Offset);
+                        tensors[index] = DecodeTensor(buffer, absoluteOffset, info);
+                    });
+                }
+                catch (AggregateException ex) when (ex.Flatten().InnerExceptions.Count > 0)
+                {
+                    ExceptionDispatchInfo.Capture(ex.Flatten().InnerExceptions[0]).Throw();
+                    throw;
+                }
             }
+            else
+                for (int index = 0; index < tensorInfos.Count; index++)
+                {
+                    var info = tensorInfos[index];
+                    int absoluteOffset = dataStart + checked((int)info.Offset);
+                    tensors[index] = DecodeTensor(buffer, absoluteOffset, info);
+                }
 
             return new GgufFile(version, metadata, tensors);
         }
@@ -146,12 +166,32 @@ namespace Neuraval.Core.Serialization.Gguf
             {
                 case GgmlType.F32:
                     return DequantizeF32(buffer, offset, elementCount);
+                case GgmlType.F64:
+                    return DequantizeF64(buffer, offset, elementCount);
                 case GgmlType.F16:
                     return DequantizeF16(buffer, offset, elementCount);
+                case GgmlType.BF16:
+                    return DequantizeBf16(buffer, offset, elementCount);
+                case GgmlType.I8:
+                    return DequantizeI8(buffer, offset, elementCount);
+                case GgmlType.I16:
+                    return DequantizeI16(buffer, offset, elementCount);
+                case GgmlType.I32:
+                    return DequantizeI32(buffer, offset, elementCount);
+                case GgmlType.I64:
+                    return DequantizeI64(buffer, offset, elementCount);
                 case GgmlType.Q8_0:
                     return DequantizeQ8_0(buffer, offset, elementCount);
+                case GgmlType.Q8_1:
+                    return DequantizeQ8_1(buffer, offset, elementCount);
                 case GgmlType.Q4_0:
                     return DequantizeQ4_0(buffer, offset, elementCount);
+                case GgmlType.Q4_1:
+                    return DequantizeQ4_1(buffer, offset, elementCount);
+                case GgmlType.Q5_0:
+                    return DequantizeQ5_0(buffer, offset, elementCount);
+                case GgmlType.Q5_1:
+                    return DequantizeQ5_1(buffer, offset, elementCount);
                 case GgmlType.Q3_K:
                     return DequantizeQ3_K(buffer, offset, elementCount);
                 case GgmlType.Q2_K:
@@ -181,6 +221,14 @@ namespace Neuraval.Core.Serialization.Gguf
             return result;
         }
 
+        private static float[] DequantizeF64(byte[] buffer, int offset, long elementCount)
+        {
+            var result = new float[elementCount];
+            for (long i = 0; i < elementCount; i++)
+                result[i] = (float)BinaryPrimitives.ReadDoubleLittleEndian(buffer.AsSpan(offset + (int)(i * 8), 8));
+            return result;
+        }
+
         private static float[] DequantizeF16(byte[] buffer, int offset, long elementCount)
         {
             var result = new float[elementCount];
@@ -190,6 +238,49 @@ namespace Neuraval.Core.Serialization.Gguf
                 result[i] = (float)BitConverter.UInt16BitsToHalf(bits);
             }
 
+            return result;
+        }
+
+        private static float[] DequantizeBf16(byte[] buffer, int offset, long elementCount)
+        {
+            var result = new float[elementCount];
+            for (long i = 0; i < elementCount; i++)
+            {
+                uint bits = (uint)BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(offset + (int)(i * 2), 2)) << 16;
+                result[i] = BitConverter.UInt32BitsToSingle(bits);
+            }
+            return result;
+        }
+
+        private static float[] DequantizeI8(byte[] buffer, int offset, long elementCount)
+        {
+            var result = new float[elementCount];
+            for (long i = 0; i < elementCount; i++)
+                result[i] = unchecked((sbyte)buffer[offset + (int)i]);
+            return result;
+        }
+
+        private static float[] DequantizeI16(byte[] buffer, int offset, long elementCount)
+        {
+            var result = new float[elementCount];
+            for (long i = 0; i < elementCount; i++)
+                result[i] = BinaryPrimitives.ReadInt16LittleEndian(buffer.AsSpan(offset + (int)(i * 2), 2));
+            return result;
+        }
+
+        private static float[] DequantizeI32(byte[] buffer, int offset, long elementCount)
+        {
+            var result = new float[elementCount];
+            for (long i = 0; i < elementCount; i++)
+                result[i] = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(offset + (int)(i * 4), 4));
+            return result;
+        }
+
+        private static float[] DequantizeI64(byte[] buffer, int offset, long elementCount)
+        {
+            var result = new float[elementCount];
+            for (long i = 0; i < elementCount; i++)
+                result[i] = BinaryPrimitives.ReadInt64LittleEndian(buffer.AsSpan(offset + (int)(i * 8), 8));
             return result;
         }
 
@@ -217,6 +308,26 @@ namespace Neuraval.Core.Serialization.Gguf
                 }
             }
 
+            return result;
+        }
+
+        private static float[] DequantizeQ8_1(byte[] buffer, int offset, long elementCount)
+        {
+            const int blockElements = 32;
+            const int blockBytes = 2 + 2 + blockElements;
+            if (elementCount % blockElements != 0)
+                throw new InvalidDataException("El numero de elementos Q8_1 debe ser multiplo de 32");
+
+            var result = new float[elementCount];
+            long blockCount = elementCount / blockElements;
+            for (long block = 0; block < blockCount; block++)
+            {
+                int blockOffset = offset + (int)(block * blockBytes);
+                float scale = (float)BitConverter.UInt16BitsToHalf(
+                    BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(blockOffset, 2)));
+                for (int i = 0; i < blockElements; i++)
+                    result[block * blockElements + i] = unchecked((sbyte)buffer[blockOffset + 4 + i]) * scale;
+            }
             return result;
         }
 
@@ -249,6 +360,87 @@ namespace Neuraval.Core.Serialization.Gguf
                 }
             }
 
+            return result;
+        }
+
+        private static float[] DequantizeQ4_1(byte[] buffer, int offset, long elementCount)
+        {
+            const int blockElements = 32;
+            const int blockBytes = 2 + 2 + blockElements / 2;
+            if (elementCount % blockElements != 0)
+                throw new InvalidDataException("El numero de elementos Q4_1 debe ser multiplo de 32");
+
+            var result = new float[elementCount];
+            long blockCount = elementCount / blockElements;
+            for (long block = 0; block < blockCount; block++)
+            {
+                int blockOffset = offset + (int)(block * blockBytes);
+                float scale = (float)BitConverter.UInt16BitsToHalf(BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(blockOffset, 2)));
+                float min = (float)BitConverter.UInt16BitsToHalf(BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(blockOffset + 2, 2)));
+                for (int i = 0; i < blockElements / 2; i++)
+                {
+                    byte packed = buffer[blockOffset + 4 + i];
+                    result[block * blockElements + i] = (packed & 0x0F) * scale + min;
+                    result[block * blockElements + i + blockElements / 2] = (packed >> 4) * scale + min;
+                }
+            }
+            return result;
+        }
+
+        private static float[] DequantizeQ5_0(byte[] buffer, int offset, long elementCount)
+        {
+            const int blockElements = 32;
+            const int halfBlockElements = blockElements / 2;
+            const int blockBytes = 2 + 4 + halfBlockElements;
+            if (elementCount % blockElements != 0)
+                throw new InvalidDataException("El numero de elementos Q5_0 debe ser multiplo de 32");
+
+            var result = new float[elementCount];
+            long blockCount = elementCount / blockElements;
+            for (long block = 0; block < blockCount; block++)
+            {
+                int blockOffset = offset + (int)(block * blockBytes);
+                float scale = (float)BitConverter.UInt16BitsToHalf(BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(blockOffset, 2)));
+                uint highBits = BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(blockOffset + 2, 4));
+                int quantOffset = blockOffset + 6;
+                for (int i = 0; i < halfBlockElements; i++)
+                {
+                    byte packed = buffer[quantOffset + i];
+                    int low = (packed & 0x0F) | (int)(((highBits >> i) & 1) << 4);
+                    int high = (packed >> 4) | (int)(((highBits >> (i + halfBlockElements)) & 1) << 4);
+                    result[block * blockElements + i] = (low - 16) * scale;
+                    result[block * blockElements + i + halfBlockElements] = (high - 16) * scale;
+                }
+            }
+            return result;
+        }
+
+        private static float[] DequantizeQ5_1(byte[] buffer, int offset, long elementCount)
+        {
+            const int blockElements = 32;
+            const int halfBlockElements = blockElements / 2;
+            const int blockBytes = 2 + 2 + 4 + halfBlockElements;
+            if (elementCount % blockElements != 0)
+                throw new InvalidDataException("El numero de elementos Q5_1 debe ser multiplo de 32");
+
+            var result = new float[elementCount];
+            long blockCount = elementCount / blockElements;
+            for (long block = 0; block < blockCount; block++)
+            {
+                int blockOffset = offset + (int)(block * blockBytes);
+                float scale = (float)BitConverter.UInt16BitsToHalf(BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(blockOffset, 2)));
+                float min = (float)BitConverter.UInt16BitsToHalf(BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(blockOffset + 2, 2)));
+                uint highBits = BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(blockOffset + 4, 4));
+                int quantOffset = blockOffset + 8;
+                for (int i = 0; i < halfBlockElements; i++)
+                {
+                    byte packed = buffer[quantOffset + i];
+                    int low = (packed & 0x0F) | (int)(((highBits >> i) & 1) << 4);
+                    int high = (packed >> 4) | (int)(((highBits >> (i + halfBlockElements)) & 1) << 4);
+                    result[block * blockElements + i] = low * scale + min;
+                    result[block * blockElements + i + halfBlockElements] = high * scale + min;
+                }
+            }
             return result;
         }
 

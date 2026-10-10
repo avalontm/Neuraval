@@ -1,6 +1,5 @@
 using System;
 using Neuraval.Core.Models.RoPE;
-using Neuraval.Tensor;
 
 namespace Neuraval.Core.Models
 {
@@ -8,6 +7,7 @@ namespace Neuraval.Core.Models
     {
         private readonly TransformerConfig _config;
         private readonly int _seed;
+        private readonly bool _inferenceOnly;
 
         private RMSNorm _norm1;
         private RMSNorm _norm2;
@@ -24,6 +24,11 @@ namespace Neuraval.Core.Models
         public int IntermediateSize => _config.IntermediateSize;
 
         public ModernDecoderBlock(TransformerConfig config, int seed = 42)
+            : this(config, seed, deferLayerInitialization: false)
+        {
+        }
+
+        private ModernDecoderBlock(TransformerConfig config, int seed, bool deferLayerInitialization)
         {
             if (config == null)
                 throw new ArgumentNullException(nameof(config));
@@ -32,9 +37,7 @@ namespace Neuraval.Core.Models
 
             _config = config.Clone();
             _seed = seed;
-
-            _norm1 = new RMSNorm(_config.HiddenSize, _config.RmsNormEps);
-            _norm2 = new RMSNorm(_config.HiddenSize, _config.RmsNormEps);
+            _inferenceOnly = deferLayerInitialization;
 
             _rotary = new RotaryEmbedding(new RotaryConfig
             {
@@ -43,8 +46,20 @@ namespace Neuraval.Core.Models
                 RopeTheta = _config.RopeTheta
             });
 
-            _attention = new GQAAttention(_config.HiddenSize, _config.NumAttentionHeads, _config.NumKeyValueHeads, _rotary, seed);
-            _feedforward = new SwiGLUFeedForward(_config.HiddenSize, _config.IntermediateSize, seed + 1);
+            if (deferLayerInitialization)
+            {
+                _norm1 = null!;
+                _norm2 = null!;
+                _attention = null!;
+                _feedforward = null!;
+            }
+            else
+            {
+                _norm1 = new RMSNorm(_config.HiddenSize, _config.RmsNormEps);
+                _norm2 = new RMSNorm(_config.HiddenSize, _config.RmsNormEps);
+                _attention = new GQAAttention(_config.HiddenSize, _config.NumAttentionHeads, _config.NumKeyValueHeads, _rotary, seed);
+                _feedforward = new SwiGLUFeedForward(_config.HiddenSize, _config.IntermediateSize, seed + 1);
+            }
         }
 
         public void ZeroGradients()
@@ -72,13 +87,15 @@ namespace Neuraval.Core.Models
                 throw new ArgumentException($"Input dimension {embDim} does not match expected {_config.HiddenSize}");
             }
 
-            _lastInput = (float[,,])input.Clone();
+            if (!_inferenceOnly)
+                _lastInput = (float[,,])input.Clone();
 
             var norm1Output = _norm1.ForwardBatch(input);
             var attentionOutput = _attention.Forward(norm1Output, positionOffset);
             var residual1 = AddResidualBatch(input, attentionOutput);
 
-            _lastResidual1 = residual1;
+            if (!_inferenceOnly)
+                _lastResidual1 = residual1;
 
             var norm2Output = _norm2.ForwardBatch(residual1);
             var ffOutput = _feedforward.ForwardBatch(norm2Output);
@@ -123,10 +140,18 @@ namespace Neuraval.Core.Models
 
         private static float[,,] AddResidualBatch(float[,,] input, float[,,] residual)
         {
-            var inputTensor = Neuraval.Tensor.Tensor.FromArray3D(input);
-            var residualTensor = Neuraval.Tensor.Tensor.FromArray3D(residual);
+            if (input.GetLength(0) != residual.GetLength(0) ||
+                input.GetLength(1) != residual.GetLength(1) ||
+                input.GetLength(2) != residual.GetLength(2))
+                throw new ArgumentException("Las dimensiones de la entrada y del residual deben coincidir");
 
-            return TensorOps.Add(inputTensor, residualTensor).ToArray3D();
+            var output = new float[input.GetLength(0), input.GetLength(1), input.GetLength(2)];
+            for (int batch = 0; batch < input.GetLength(0); batch++)
+                for (int token = 0; token < input.GetLength(1); token++)
+                    for (int dimension = 0; dimension < input.GetLength(2); dimension++)
+                        output[batch, token, dimension] = input[batch, token, dimension] + residual[batch, token, dimension];
+
+            return output;
         }
 
         public void UpdateWeights(float learningRate)
@@ -158,14 +183,14 @@ namespace Neuraval.Core.Models
             };
         }
 
-        public static ModernDecoderBlock LoadState(ModernDecoderBlockState state)
+        public static ModernDecoderBlock LoadState(ModernDecoderBlockState state, bool inferenceOnly = false)
         {
-            var block = new ModernDecoderBlock(state.Config, state.Seed);
+            var block = new ModernDecoderBlock(state.Config, state.Seed, deferLayerInitialization: inferenceOnly);
 
-            block._norm1 = RMSNorm.LoadState(state.Norm1State);
-            block._norm2 = RMSNorm.LoadState(state.Norm2State);
-            block._attention = GQAAttention.LoadState(state.AttentionState, block._rotary);
-            block._feedforward = SwiGLUFeedForward.LoadState(state.FeedforwardState);
+            block._norm1 = RMSNorm.LoadState(state.Norm1State, inferenceOnly);
+            block._norm2 = RMSNorm.LoadState(state.Norm2State, inferenceOnly);
+            block._attention = GQAAttention.LoadState(state.AttentionState, block._rotary, inferenceOnly);
+            block._feedforward = SwiGLUFeedForward.LoadState(state.FeedforwardState, inferenceOnly);
 
             return block;
         }

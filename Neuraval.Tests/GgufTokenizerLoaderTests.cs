@@ -68,7 +68,8 @@ namespace Neuraval.Tests
             uint? bosTokenId = 0,
             uint? eosTokenId = 0,
             uint? unknownTokenId = null,
-            uint? paddingTokenId = null)
+            uint? paddingTokenId = null,
+            bool? addBosToken = null)
         {
             tokens ??= BaseTokens;
             merges ??= BaseMerges;
@@ -91,6 +92,9 @@ namespace Neuraval.Tests
 
             if (paddingTokenId.HasValue)
                 metadata["tokenizer.ggml.padding_token_id"] = U32(paddingTokenId.Value);
+
+            if (addBosToken.HasValue)
+                metadata["tokenizer.ggml.add_bos_token"] = new GgufMetadataValue(GgufValueType.Bool, addBosToken.Value);
 
             return new GgufFile(3, metadata, Array.Empty<GgufTensorEntry>());
         }
@@ -118,6 +122,23 @@ namespace Neuraval.Tests
 
             Assert.Equal(1, tokenizer.ImStartToken);
             Assert.Equal(2, tokenizer.ImEndToken);
+        }
+
+        [Fact]
+        public void Load_Gpt2Tokenizer_RespectsAddBosTokenFalseForChatPrompts()
+        {
+            var file = BuildFile(
+                tokens: new[] { "<|endoftext|>", "<|im_start|>", "<|im_end|>", "a", "b", "c", "ab", "bc" },
+                bosTokenId: 0,
+                eosTokenId: 0,
+                addBosToken: false);
+            var tokenizer = GgufTokenizerLoader.Load(file);
+
+            var ids = tokenizer.EncodeChat(new List<ChatMessage> { new(ChatRole.User, "hi") });
+
+            Assert.False(tokenizer.AddBosToken);
+            Assert.Equal(tokenizer.ImStartToken, ids[0]);
+            Assert.NotEqual(tokenizer.StartToken, ids[0]);
         }
 
         [Fact]

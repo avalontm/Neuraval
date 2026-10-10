@@ -25,6 +25,22 @@ namespace Neuraval.Tests
         }
 
         [Fact]
+        public void ForwardIncrementalLastToken_MatchesFinalPromptLogits()
+        {
+            var model = new ModernDecoderModel(SmallConfig(), seed: 6);
+            var prompt = new[] { 1, 2, 3 };
+            var fullCache = model.CreateGenerationCache(prompt.Length);
+            var fullLogits = model.ForwardIncremental(prompt, fullCache);
+
+            var lastTokenCache = model.CreateGenerationCache(prompt.Length);
+            var lastTokenLogits = model.ForwardIncrementalLastToken(prompt, lastTokenCache);
+
+            for (int token = 0; token < model.VocabSize; token++)
+                Assert.Equal(fullLogits[prompt.Length - 1, token], lastTokenLogits[token], precision: 5);
+            Assert.Equal(fullCache.Length, lastTokenCache.Length);
+        }
+
+        [Fact]
         public void GenerateWithCache_Greedy_MatchesUncachedGenerate()
         {
             var model = new ModernDecoderModel(SmallConfig(), seed: 7);

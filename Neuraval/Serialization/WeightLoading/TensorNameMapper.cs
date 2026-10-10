@@ -31,17 +31,23 @@ namespace Neuraval.Core.Serialization.WeightLoading
             return $"{LayerPrefix}{layerIndex}.self_attn.q_proj.weight";
         }
 
+        public static string SelfAttnQProjBiasName(int layerIndex) => $"{SelfAttnQProjName(layerIndex)}".Replace(".weight", ".bias", StringComparison.Ordinal);
+
         public static string SelfAttnKProjName(int layerIndex)
         {
             EnsureNonNegative(layerIndex);
             return $"{LayerPrefix}{layerIndex}.self_attn.k_proj.weight";
         }
 
+        public static string SelfAttnKProjBiasName(int layerIndex) => $"{SelfAttnKProjName(layerIndex)}".Replace(".weight", ".bias", StringComparison.Ordinal);
+
         public static string SelfAttnVProjName(int layerIndex)
         {
             EnsureNonNegative(layerIndex);
             return $"{LayerPrefix}{layerIndex}.self_attn.v_proj.weight";
         }
+
+        public static string SelfAttnVProjBiasName(int layerIndex) => $"{SelfAttnVProjName(layerIndex)}".Replace(".weight", ".bias", StringComparison.Ordinal);
 
         public static string SelfAttnOProjName(int layerIndex)
         {

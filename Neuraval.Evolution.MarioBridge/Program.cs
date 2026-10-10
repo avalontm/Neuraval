@@ -25,6 +25,8 @@ namespace Neuraval.Evolution.MarioBridge
 
         private static void Main(string[] args)
         {
+            args = NormalizeCommand(args);
+
             if (args.Any(arg => arg.Equals("--help", StringComparison.OrdinalIgnoreCase) || arg.Equals("-h", StringComparison.OrdinalIgnoreCase)))
             {
                 PrintUsage();
@@ -76,6 +78,13 @@ namespace Neuraval.Evolution.MarioBridge
                 return;
             }
 
+            if (!args.Any(arg => arg.Equals("--evolve", StringComparison.OrdinalIgnoreCase)))
+            {
+                Console.WriteLine("Indica un comando para MarioBridge.");
+                PrintUsage();
+                return;
+            }
+
             var populationSize = TryGetInt(GetOption(args, "--population"), DefaultPopulationSize);
             var workers = Math.Max(1, TryGetInt(GetOption(args, "--workers"), 1));
 
@@ -100,43 +109,46 @@ namespace Neuraval.Evolution.MarioBridge
 
         private static void PrintUsage()
         {
-            Console.WriteLine("MarioBridge - Neuraval.Evolution");
+            Console.WriteLine("MarioBridge — comandos básicos");
+            Console.WriteLine("  capture   Grabar controles del teclado para el dataset.");
+            Console.WriteLine("  train     Imitar las acciones guardadas en el dataset.");
+            Console.WriteLine("  play      Probar la política durante un episodio.");
+            Console.WriteLine("  learn     Repetir captura humana y entrenamiento por imitación.");
+            Console.WriteLine("  evolve    Aprender por evolución NEAT y recompensa del juego.");
             Console.WriteLine();
-            Console.WriteLine("Modos (si no pones ninguno, entrena por NEAT):");
-            Console.WriteLine("  --capture    Graba tu juego (teclado) en checkpoints/mario_dataset.navm.");
-            Console.WriteLine("  --imitate    Entrena por imitacion con el dataset -> checkpoints/mario_policy.navm.");
-            Console.WriteLine("  --play       El modelo entrenado juega solo (turbo).");
-            Console.WriteLine("  --learn      Bucle: captura -> entrena -> juega; Ctrl+C avanza de fase, Ctrl+C doble sale.");
-            Console.WriteLine("  --evaluate   Corre N episodios por --level SIN entrenar ni modificar el modelo, y");
-            Console.WriteLine("               reporta % completado / best X / muertes por nivel. Pensado para medir");
-            Console.WriteLine("               generalizacion (Fase 5): pasale un --level en el que el modelo NO");
-            Console.WriteLine("               entreno para ver si de verdad 'aprendio a jugar' o memorizo DP1.");
-            Console.WriteLine("  --help, -h   Esta ayuda.");
+            Console.WriteLine("Ejemplos:");
+            Console.WriteLine("  dotnet run --project Neuraval.Evolution.MarioBridge -- capture");
+            Console.WriteLine("  dotnet run --project Neuraval.Evolution.MarioBridge -- train");
+            Console.WriteLine("  dotnet run --project Neuraval.Evolution.MarioBridge -- play");
+            Console.WriteLine("  dotnet run --project Neuraval.Evolution.MarioBridge -- learn");
             Console.WriteLine();
-            Console.WriteLine("Opciones:");
-            Console.WriteLine("  --level <nombre>    Nivel/savestate a rotar (repetible; default 'Nivel 0 (DP1.state)').");
-            Console.WriteLine("  --model <ruta>      Modelo NEAT a usar con --evaluate (default " + BestModelPath + ").");
-            Console.WriteLine("  --episodes <N>      Episodios por nivel con --evaluate (default " + DefaultEvaluationEpisodes + ").");
-            Console.WriteLine("  --population <N>    Tamano de poblacion NEAT (default 16).");
-            Console.WriteLine("  --seed-policy <ruta> Semilla NEAT desde una politica imitada.");
-            Console.WriteLine("  --workers <N>       Instancias BizHawk en paralelo (default 1).");
-            Console.WriteLine("  --fresh             Borra artefactos de corridas anteriores antes de empezar.");
-            Console.WriteLine("  --curriculum        Modo entrenamiento (sin --learn/--play/--capture): en vez de rotar");
-            Console.WriteLine("                      los --level por generacion, arranca en el primero y solo avanza");
-            Console.WriteLine("                      al siguiente cuando el % de completions de una ventana de");
-            Console.WriteLine("                      generaciones recientes supera el umbral. Se queda en el ultimo");
-            Console.WriteLine("                      tramo configurado indefinidamente (no hay 'graduacion' automatica");
-            Console.WriteLine("                      a otros niveles; agregalos vos a mano con mas --level).");
-            Console.WriteLine("  --curriculum-window <N>     Generaciones en la ventana movil (default " + MarioCurriculum.DefaultWindowSize + ").");
-            Console.WriteLine("  --curriculum-threshold <pct> % de completions en la ventana para avanzar de tramo (default " + MarioCurriculum.DefaultAdvanceThresholdPercent.ToString("F0", CultureInfo.InvariantCulture) + ").");
-            Console.WriteLine();
-            Console.WriteLine("Artifacts fijos:");
-            Console.WriteLine($"  {CheckpointPath}  checkpoint de poblacion NEAT");
-            Console.WriteLine($"  {BestModelPath}    mejor genoma exportado por NEAT");
-            Console.WriteLine($"  {CapturePath}   dataset de imitacion (acumulativo)");
-            Console.WriteLine($"  {PolicyPath}   politica imitada");
-            Console.WriteLine($"  {FitnessHistoryPath} historial de fitness por generacion");
-            Console.WriteLine($"  {GeneralizationReportPath} reporte de --evaluate (acumulativo)");
+            Console.WriteLine("Opcional: --fresh borra datos previos de captura o evolución; help muestra esta ayuda.");
+        }
+
+        private static string[] NormalizeCommand(string[] args)
+        {
+            if (args.Length == 0)
+            {
+                return new[] { "--help" };
+            }
+
+            var mode = args[0].ToLowerInvariant() switch
+            {
+                "capture" => "--capture",
+                "train" => "--imitate",
+                "play" => "--play",
+                "learn" => "--learn",
+                "evolve" => "--evolve",
+                "help" => "--help",
+                _ => null
+            };
+
+            if (mode == null)
+            {
+                return args;
+            }
+
+            return new[] { mode }.Concat(args.Skip(1)).ToArray();
         }
 
         private static void RunCaptureMode()
@@ -169,80 +181,92 @@ namespace Neuraval.Evolution.MarioBridge
             using var recorder = new MarioDatasetRecorder(CapturePath, append: true);
             var sampler = new MarioFrameSampler();
             var summary = new MarioCaptureSummary();
-            var state = connection.ReceiveState();
             int? previousX = null;
             int? previousCoins = null;
             int? previousPowerup = null;
             var frames = 0;
             var episodes = 0;
 
-            while (!stopRequested)
+            try
             {
-                var action = MarioControllerEncoder.Decode(state.Controller1, state.Controller2);
-                summary.RecordFrame(state, action);
-
-                if (state.IsDead || state.IsLevelComplete || state.ManualResetRequested)
-                {
-                    episodes++;
-                    var reason = state.IsLevelComplete
-                        ? MarioTerminalReason.LevelComplete
-                        : state.IsDead
-                            ? MarioTerminalReason.Death
-                            : MarioTerminalReason.ManualReset;
-                    recorder.Append(state, action, 0f, done: true, reason);
-                    summary.RecordSample();
-                    summary.RecordEpisode(state, reason);
-
-                    var reasonLabel = state.IsLevelComplete ? "nivel completado" : state.IsDead ? "muerte" : "reset manual";
-                    Console.WriteLine($"    Episodio {episodes} terminado ({reasonLabel}): marioX final {state.MarioX}.");
-
-                    connection.SendCapture(state.LevelIndex);
-                    previousX = null;
-                    previousCoins = null;
-                    previousPowerup = null;
-                }
-                else
-                {
-                    var reward = previousX.HasValue ? state.MarioX - previousX.Value : 0f;
-
-                    if (previousCoins.HasValue && state.Coins > previousCoins.Value)
-                    {
-                        reward += (state.Coins - previousCoins.Value) * SnesEnvironment.CoinReward;
-                    }
-
-                    if (previousPowerup.HasValue && state.PowerupLevel != previousPowerup.Value)
-                    {
-                        var powerupDelta = state.PowerupLevel - previousPowerup.Value;
-                        reward += powerupDelta > 0
-                            ? powerupDelta * SnesEnvironment.PowerupGainReward
-                            : powerupDelta * SnesEnvironment.PowerupLossPenalty;
-                    }
-
-                    if (sampler.ShouldRecord(state, action, terminal: false))
-                    {
-                        recorder.Append(state, action, reward, done: false);
-                        summary.RecordSample();
-                    }
-
-                    previousX = state.MarioX;
-                    previousCoins = state.Coins;
-                    previousPowerup = state.PowerupLevel;
-                    frames++;
-
-                    connection.SendAction(SnesAction.None);
-                }
-
-                if (stopRequested)
-                {
-                    break;
-                }
-
+                var state = connection.ReceiveState();
+                // Enable keyboard passthrough before the first regular action can clear it.
+                connection.SendCapture(state.LevelIndex);
                 state = connection.ReceiveState();
 
-                if (frames > 0 && frames % 600 == 0)
+                while (!stopRequested)
                 {
-                    Console.WriteLine($"    Capturando... {frames} frames, {episodes} episodios.");
+                    var action = MarioControllerEncoder.Decode(state.Controller1, state.Controller2);
+                    summary.RecordFrame(state, action);
+
+                    if (state.IsDead || state.IsLevelComplete || state.ManualResetRequested)
+                    {
+                        episodes++;
+                        var reason = state.IsLevelComplete
+                            ? MarioTerminalReason.LevelComplete
+                            : state.IsDead
+                                ? MarioTerminalReason.Death
+                                : MarioTerminalReason.ManualReset;
+                        recorder.Append(state, action, 0f, done: true, reason);
+                        summary.RecordSample();
+                        summary.RecordEpisode(state, reason);
+
+                        var reasonLabel = state.IsLevelComplete ? "nivel completado" : state.IsDead ? "muerte" : "reset manual";
+                        Console.WriteLine($"    Episodio {episodes} terminado ({reasonLabel}): marioX final {state.MarioX}.");
+
+                        connection.SendCapture(state.LevelIndex);
+                        previousX = null;
+                        previousCoins = null;
+                        previousPowerup = null;
+                    }
+                    else
+                    {
+                        var reward = previousX.HasValue ? state.MarioX - previousX.Value : 0f;
+
+                        if (previousCoins.HasValue && state.Coins > previousCoins.Value)
+                        {
+                            reward += (state.Coins - previousCoins.Value) * SnesEnvironment.CoinReward;
+                        }
+
+                        if (previousPowerup.HasValue && state.PowerupLevel != previousPowerup.Value)
+                        {
+                            var powerupDelta = state.PowerupLevel - previousPowerup.Value;
+                            reward += powerupDelta > 0
+                                ? powerupDelta * SnesEnvironment.PowerupGainReward
+                                : powerupDelta * SnesEnvironment.PowerupLossPenalty;
+                        }
+
+                        if (sampler.ShouldRecord(state, action, terminal: false))
+                        {
+                            recorder.Append(state, action, reward, done: false);
+                            summary.RecordSample();
+                        }
+
+                        previousX = state.MarioX;
+                        previousCoins = state.Coins;
+                        previousPowerup = state.PowerupLevel;
+                        frames++;
+
+                        connection.SendAction(SnesAction.None);
+                    }
+
+                    if (stopRequested)
+                    {
+                        break;
+                    }
+
+                    state = connection.ReceiveState();
+
+                    if (frames > 0 && frames % 600 == 0)
+                    {
+                        Console.WriteLine($"    Capturando... {frames} frames, {episodes} episodios.");
+                    }
                 }
+            }
+            catch (SnesBridgeConnectionLostException ex)
+            {
+                Console.WriteLine($"BizHawk se desconecto: {ex.Message}");
+                Console.WriteLine("Guardando las muestras capturadas hasta ahora.");
             }
 
             recorder.Complete();
@@ -261,6 +285,7 @@ namespace Neuraval.Evolution.MarioBridge
             }
 
             Console.WriteLine($"Dataset: {dataset.Samples.Count} muestras, {dataset.InputCount} entradas, {dataset.OutputCount} salidas.");
+            PrintActionDistribution(dataset.Samples);
 
             var trainer = new MarioImitationTrainer(dataset, ImitationEpochs);
             var policy = trainer.Train(new Random(1234));
@@ -268,6 +293,47 @@ namespace Neuraval.Evolution.MarioBridge
 
             Console.WriteLine($"Politica guardada: {Path.GetFullPath(PolicyPath)}");
             Console.WriteLine("Usa --play para verla jugar, o --learn (o --seed-policy + NEAT) para seguir mejorandola.");
+        }
+
+        private static void PrintActionDistribution(IReadOnlyList<MarioDatasetSample> samples)
+        {
+            if (samples.Count == 0)
+            {
+                return;
+            }
+
+            var names = new[] { "izquierda", "derecha", "A", "B", "Y", "abajo", "arriba", "X", "R" };
+            var activeCounts = new int[MarioAgentOutput.Count];
+            var targets = new float[MarioAgentOutput.Count];
+
+            foreach (var sample in samples)
+            {
+                MarioAgentOutput.ToAgentTargets(sample.ActionMask, targets);
+                for (var button = 0; button < targets.Length; button++)
+                {
+                    if (targets[button] > 0.5f)
+                    {
+                        activeCounts[button]++;
+                    }
+                }
+            }
+
+            var distribution = string.Join(", ", names.Select((name, index) =>
+                $"{name} {activeCounts[index] * 100f / samples.Count:F0}%"));
+            Console.WriteLine($"Botones presentes en las muestras: {distribution}.");
+
+            var topAction = samples
+                .GroupBy(sample => sample.ActionMask)
+                .Select(group => new { Action = group.Key, Count = group.Count() })
+                .OrderByDescending(group => group.Count)
+                .First();
+            var topPercent = topAction.Count * 100f / samples.Count;
+            Console.WriteLine($"Combinación más repetida: {topAction.Action} ({topPercent:F0}%).");
+
+            if (topPercent >= 80f)
+            {
+                Console.WriteLine("Aviso: el dataset casi siempre muestra la misma acción; la política tenderá a repetirla. Graba más situaciones y decisiones variadas.");
+            }
         }
 
         private static void RunPlayMode(string[] args)
@@ -363,6 +429,15 @@ namespace Neuraval.Evolution.MarioBridge
                 }
 
                 Console.WriteLine($"    Episodio {episode} terminado: {steps} frames, avance {state.MarioX - startX} px.");
+                Console.WriteLine("Prueba terminada; vuelve a ejecutar 'play' para otra partida.");
+                try
+                {
+                    connection.SendTurbo(false);
+                }
+                catch (SnesBridgeConnectionLostException)
+                {
+                }
+                break;
             }
 
             Console.WriteLine("Reproduccion detenida.");
@@ -582,6 +657,8 @@ namespace Neuraval.Evolution.MarioBridge
                 var sampler = new MarioFrameSampler();
                 var summary = new MarioCaptureSummary();
                 var state = connection.ReceiveState();
+                connection.SendCapture(state.LevelIndex);
+                state = connection.ReceiveState();
                 int? previousX = null;
                 int? previousCoins = null;
                 int? previousPowerup = null;

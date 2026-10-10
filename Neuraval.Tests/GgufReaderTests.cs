@@ -396,13 +396,54 @@ namespace Neuraval.Tests
         }
 
         [Fact]
-        public void Read_UnsupportedTensorType_Throws()
+        public void Read_Q4_1Tensor_DecodesScaleAndMinimum()
         {
             var bytes = new GgufBuilder()
-                .AddTensor("weight", GgmlType.Q4_1, new[] { 32 }, new byte[64])
+                .AddTensor("weight", GgmlType.Q4_1, new[] { 32 }, new byte[20])
                 .Build();
 
-            Assert.Throws<NotSupportedException>(() => ReadFrom(bytes));
+            var tensor = ReadFrom(bytes).Find("weight")!;
+            Assert.Equal(32, tensor.Data.Length);
+            Assert.All(tensor.Data, value => Assert.Equal(0f, value));
+        }
+
+        [Fact]
+        public void Read_Q8_1Tensor_UsesHalfScaleAndPackedSignedValues()
+        {
+            using var rawStream = new MemoryStream();
+            rawStream.Write(BitConverter.GetBytes(BitConverter.HalfToUInt16Bits((Half)0.5f)));
+            rawStream.Write(BitConverter.GetBytes(BitConverter.HalfToUInt16Bits((Half)12f)));
+            for (int i = 0; i < 32; i++)
+                rawStream.WriteByte(unchecked((byte)(sbyte)(i - 16)));
+
+            var bytes = new GgufBuilder()
+                .AddTensor("weight", GgmlType.Q8_1, new[] { 32 }, rawStream.ToArray())
+                .Build();
+
+            var tensor = ReadFrom(bytes).Find("weight")!;
+            for (int i = 0; i < 32; i++)
+                Assert.Equal((i - 16) * 0.5f, tensor.Data[i]);
+        }
+
+        [Fact]
+        public void Read_Q5_0Tensor_DecodesHighBitsAndSignedOffset()
+        {
+            using var rawStream = new MemoryStream();
+            rawStream.Write(BitConverter.GetBytes(BitConverter.HalfToUInt16Bits((Half)0.5f)));
+            rawStream.Write(BitConverter.GetBytes(0x00010001u));
+            rawStream.Write(new byte[16]);
+
+            var bytes = new GgufBuilder()
+                .AddTensor("weight", GgmlType.Q5_0, new[] { 32 }, rawStream.ToArray())
+                .Build();
+
+            var tensor = ReadFrom(bytes).Find("weight")!;
+            Assert.Equal(0f, tensor.Data[0]);
+            Assert.Equal(0f, tensor.Data[16]);
+            for (int i = 1; i < 16; i++)
+                Assert.Equal(-8f, tensor.Data[i]);
+            for (int i = 17; i < 32; i++)
+                Assert.Equal(-8f, tensor.Data[i]);
         }
 
         [Fact]

@@ -352,7 +352,11 @@ local function getTileFull(marioX, marioY, dx, dy)
 end
 
 local function isSolidTile(tx, ty)
-    return memory.readbyte(MAP16_LOW_BYTE_TABLE + tileIndex(tx, ty)) ~= 0
+    local idx = tileIndex(tx, ty)
+    local low = memory.readbyte(MAP16_LOW_BYTE_TABLE + idx)
+    local high = memory.readbyte(MAP16_HIGH_BYTE_TABLE + idx)
+    local tileFull = high * 256 + low
+    return tileFull ~= 0 and low ~= 0x2B
 end
 
 local COIN_TILE_LOW_BYTES = { [0x2B] = true }
@@ -386,35 +390,43 @@ local function buildVisionData(marioX, marioY)
             local tileLow = tileFull % 256
 
             tileCount = tileCount + 1
-            tiles[tileCount] = tostring(tileLow)
+            tiles[tileCount] = tostring(tileFull)
 
             visionGridCount = visionGridCount + 1
             local cell = visionGridCache[visionGridCount]
             cell.dx, cell.dy, cell.tileFull, cell.tileLow = dx, dy, tileFull, tileLow
 
-            local distSq = dx * dx + dy * dy
             local cellX = math.floor((marioX + dx) / 16) * 16 + 8 - marioX
             local cellY = math.floor((marioY + dy) / 16) * 16 + 8 - marioY
+            local distSq = cellX * cellX + cellY * cellY
 
-            if COIN_TILE_LOW_BYTES[tileLow] and (coinBestSq == nil or distSq < coinBestSq) then
+            if COIN_TILE_LOW_BYTES[tileLow] then
                 coinCount = coinCount + 1
-                coinBestSq = distSq
-                coinDx, coinDy = cellX, cellY
+                if coinBestSq == nil or distSq < coinBestSq then
+                    coinBestSq = distSq
+                    coinDx, coinDy = cellX, cellY
+                end
             end
-            if COIN_BLOCK_LOW_BYTES[tileLow] and (blockBestSq == nil or distSq < blockBestSq) then
+            if COIN_BLOCK_LOW_BYTES[tileLow] then
                 blockCount = blockCount + 1
-                blockBestSq = distSq
-                blockDx, blockDy = cellX, cellY
+                if blockBestSq == nil or distSq < blockBestSq then
+                    blockBestSq = distSq
+                    blockDx, blockDy = cellX, cellY
+                end
             end
-            if DIALOG_TILE_FULL[tileFull] and (dialogBestSq == nil or distSq < dialogBestSq) then
+            if DIALOG_TILE_FULL[tileFull] then
                 dialogCount = dialogCount + 1
-                dialogBestSq = distSq
-                dialogDx, dialogDy = cellX, cellY
+                if dialogBestSq == nil or distSq < dialogBestSq then
+                    dialogBestSq = distSq
+                    dialogDx, dialogDy = cellX, cellY
+                end
             end
-            if PIPE_ENTRANCE_TILE_FULL[tileFull] and (pipeBestSq == nil or distSq < pipeBestSq) then
+            if PIPE_ENTRANCE_TILE_FULL[tileFull] then
                 pipeCount = pipeCount + 1
-                pipeBestSq = distSq
-                pipeDx, pipeDy = cellX, cellY
+                if pipeBestSq == nil or distSq < pipeBestSq then
+                    pipeBestSq = distSq
+                    pipeDx, pipeDy = cellX, cellY
+                end
             end
         end
     end
@@ -737,7 +749,7 @@ local function tileFillColor(tileFull, tileLow)
     if PIPE_ENTRANCE_TILE_FULL[tileFull] then
         return TILE_PIPE_FILL
     end
-    if tileLow ~= 0 then
+    if tileFull ~= 0 then
         return TILE_SOLID_FILL
     end
     return nil
@@ -754,8 +766,11 @@ local function drawVisionOverlay(marioX, marioY, cameraX, cameraY)
 
             gui.drawRectangle(screenX, screenY, 16, 16, GRID_LINE_COLOR, tileFillColor(cell.tileFull, cell.tileLow))
 
-            if cell.tileLow ~= 0 then
-                gui.drawText(screenX + 1, screenY + 4, string.format("%02X", cell.tileLow), TILE_ID_LABEL_COLOR, nil, 8)
+            if cell.tileFull ~= 0 then
+                local tileLabel = cell.tileFull > 0xFF
+                    and string.format("%04X", cell.tileFull)
+                    or string.format("%02X", cell.tileLow)
+                gui.drawText(screenX + 1, screenY + 4, tileLabel, TILE_ID_LABEL_COLOR, nil, 8)
             end
 
             if cell.dx == 0 and cell.dy == 0 then
